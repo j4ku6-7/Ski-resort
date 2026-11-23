@@ -245,11 +245,13 @@ const Net = {
     const A = this.pointNode(plan.a), B = this.pointNode(plan.b), T = plan.T;
     const l = { kind: 'lift', id: this.seq.lift++, type: plan.type, T, a: A, b: B, len: plan.len, vert: plan.vert,
                 cost: plan.build, queue: [], carriers: [], clock: 0, dist: 0, nextD: 0, next: T.dwell || 0,
-                opt: Object.assign(Lifts.defaultOpt(), opt || {}), ridesToday: 0, customTowers: plan.customTowers || (plan.manual ? [] : null) };
+                opt: Object.assign(Lifts.defaultOpt(), opt || {}), ridesToday: 0, customTowers: plan.customTowers || (plan.manual ? [] : null),
+                planned: !!plan.planned };
+    if (l.planned) { l.opt.open = false; l.cost = 0; free = true; }
     if (plan.manual) l.opt.open = false;           // opens once the pylons pass inspection
     l.name = name || `L${l.id}`;
     Lifts.build(l);
-    if (l.issues.length) l.opt.open = false;
+    if (l.issues.length || l.planned) l.opt.open = false;
     this.group.add(l.vis);
     l.label = Labels.add('', 'queue', { x: A.x, y: A.y + Math.max(T.towerH, 6) + 26, z: A.z });
     A.lifts.push(l); B.lifts.push(l); this.lifts.push(l);
@@ -265,10 +267,10 @@ const Net = {
       if (n.label) n.label.pos.y = n.y + 40;
     }
     for (const r of this.runs) {
-      for (const p of r.dense) p.y = Terrain.height(p.x, p.z);
+      if (!(r.planned && r.gradeDeg)) for (const p of r.dense) p.y = Terrain.height(p.x, p.z);   // graded plans keep their target
       r.path = new Path(r.dense);
       this.group.remove(r.vis); disposeGroup(r.vis);
-      r.vis = makeRibbon(r.dense, DIFF[r.diff].color); this.group.add(r.vis);
+      r.vis = this.ribbonFor(r); this.group.add(r.vis);
       const s = r.dense[Math.min(6, r.dense.length - 1)]; r.label.pos.y = s.y + 22;
     }
     for (const l of this.lifts) {
@@ -287,7 +289,7 @@ const Net = {
   upgradePlan(l, type) {
     const P = (n) => ({ x: n.x, z: n.z, node: n });
     const plan = this.liftPlan(type, P(l.a), P(l.b), true);
-    plan.cost = Math.max(0, plan.cost - l.cost * 0.5);
+    plan.cost = l.planned ? 0 : Math.max(0, plan.cost - l.cost * 0.5);
     if (plan.ok && plan.cost > Game.money) { plan.ok = false; plan.msg = 'Not enough money'; }
     return plan;
   },
@@ -296,16 +298,16 @@ const Net = {
     if (!plan.ok) return plan;
     this.evacuate(l);
     this.group.remove(l.vis); Lifts.dispose(l.vis);
-    l.type = plan.type; l.T = plan.T; l.cost = plan.build; l.len = plan.len; l.customTowers = null;
+    l.type = plan.type; l.T = plan.T; l.cost = l.planned ? 0 : plan.build; l.len = plan.len; l.customTowers = null;
     l.clock = l.dist = l.nextD = 0; l.next = l.T.dwell || 0;
     Lifts.build(l);
     this.group.add(l.vis);
-    Terrain.clearTrees([l.a, l.b], l.T.gauge + 8);
-    Game.spend(plan.cost);
+    if (!l.planned) { Terrain.clearTrees([l.a, l.b], l.T.gauge + 8); Game.spend(plan.cost); }
     this.version++;
     return plan;
   },
   setLiftOpen(l, open) {
+    if (open && l.planned) return false;                             // still only a plan
     if (open && l.issues && l.issues.length) return false;        // failed safety inspection
     if (l.opt.open === open) return true;
     l.opt.open = open;
@@ -387,6 +389,7 @@ const Net = {
   },
 
   buildRun(plan, free = false) {
+    if (plan.planned) free = true;                 // a plan: no earthworks, no felling, no payment
     if (plan.gradeDeg && !free) {
       const op = { pts: plan.dense.map((p) => ({ x: +p.x.toFixed(1), z: +p.z.toFixed(1), y: +p.y.toFixed(2) })),
                    half: GRADE_HALF, margin: GRADE_MARGIN };
@@ -405,7 +408,7 @@ const Net = {
     plan.dense[plan.dense.length - 1] = { x: B.x, y: B.y, z: B.z };
     const r = this.addRunEdge({
       a: A, b: B, dense: plan.dense, diff: plan.diff, drop: plan.drop, maxG: plan.maxG, cost: plan.build,
-      gradeDeg: plan.gradeDeg || null, cross: plan.cross || 0, piste: plan.piste || null,
+      gradeDeg: plan.gradeDeg || null, cross: plan.cross || 0, piste: plan.piste || null, planned: !!plan.planned,
       points: plan.points.map((p) => ({ x: p.x, z: p.z })),
     });
     if (!free) Terrain.clearTrees(plan.dense, RUN_WIDTH * 0.65);
@@ -422,12 +425,58 @@ const Net = {
     r.piste = r.piste || r.id;                 // segments of one piste share its number
     r.name = `Run ${r.piste}`;
     r.path = new Path(r.dense); r.len = r.path.length;
-    r.vis = makeRibbon(r.dense, DIFF[r.diff].color);
+    if (r.planned) r.cost = 0;
+    r.vis = this.ribbonFor(r);
     this.group.add(r.vis);
     const s = r.dense[Math.min(6, r.dense.length - 1)];
-    r.label = Labels.add(String(r.piste), `run run-${r.diff}`, { x: s.x, y: s.y + 22, z: s.z });
+    r.label = Labels.add(String(r.piste), `run run-${r.diff}${r.planned ? ' planned' : ''}`, { x: s.x, y: s.y + 22, z: s.z });
     r.a.runs.push(r); r.b.runs.push(r); this.runs.push(r);
     return r;
+  },
+
+  // planned runs are a faint blueprint; graded plans show the target surface (flat, not yet dug)
+  ribbonFor(r) {
+    return r.planned ? makeRibbon(r.dense, DIFF[r.diff].color, 0.3, RUN_WIDTH, null, !!r.gradeDeg) : makeRibbon(r.dense, DIFF[r.diff].color);
+  },
+
+  // What confirming a plan costs right now (trees and earthworks are counted on today's terrain).
+  planCost(e) {
+    if (e.kind === 'lift') {
+      const T = e.T, towers = e.customTowers || Lifts.autoTowers(T, e.a, e.a.y, e.b, e.b.y);
+      const build = T.baseCost + T.perM * e.len + Lifts.towersValue(T, towers);
+      return { build, total: build + Terrain.treesNear([e.a, e.b], T.gauge + 8).length * TREE_COST };
+    }
+    let earth = 0;
+    if (e.gradeDeg) earth = (() => { const w = Terrain.computeEarthwork({ pts: e.dense, half: GRADE_HALF, margin: GRADE_MARGIN }); return (w.cut + w.fill) * EARTH_COST; })();
+    const build = e.len * RUN_COST_PER_M + earth;
+    return { build, total: build + Terrain.treesNear(e.dense, RUN_WIDTH * 0.65).length * TREE_COST };
+  },
+
+  plans() { return [...this.lifts, ...this.runs].filter((e) => e.planned); },
+
+  // Turn a plan into the real thing: pay, fell, dig, and open it.
+  confirmPlan(e) {
+    if (!e.planned) return { ok: true };
+    const c = this.planCost(e);
+    if (c.total > Game.money) return { ok: false, msg: `Not enough money to build ${e.name} (${money(c.total)})` };
+    if (e.kind === 'lift') {
+      Terrain.clearTrees([e.a, e.b], e.T.gauge + 8);
+      e.planned = false; e.cost = c.build;
+      this.group.remove(e.vis); Lifts.dispose(e.vis); Lifts.build(e); this.group.add(e.vis);
+      if (!e.issues.length) e.opt.open = true;
+    } else {
+      if (e.gradeDeg) {
+        const op = { pts: e.dense.map((p) => ({ x: +p.x.toFixed(1), z: +p.z.toFixed(1), y: +p.y.toFixed(2) })), half: GRADE_HALF, margin: GRADE_MARGIN };
+        Terrain.applyEarthwork(op); Game.earthworks.push(op);
+      }
+      e.planned = false; e.cost = c.build;
+      Terrain.clearTrees(e.dense, RUN_WIDTH * 0.65);
+      this.refreshHeights();                       // this run now sits on the real (dug) ground
+      e.label.el.classList.remove('planned');
+    }
+    Game.spend(c.total);
+    this.version++;
+    return { ok: true, cost: c.total, issues: e.issues || [] };
   },
 
   // Closest point on a piste's centreline, away from its ends (those snap to the end nodes instead).
@@ -456,7 +505,7 @@ const Net = {
     const first = d.slice(0, i).concat([jp]), second = [jp].concat(d.slice(i + 1));
     const cutAt = r.path.cum[i], frac = cutAt / r.path.length;
     const sub = (pts) => pts.filter((_, k) => k % 3 === 0 || k === pts.length - 1).map((p) => ({ x: p.x, z: p.z }));
-    const base = { diff: r.diff, maxG: r.maxG, gradeDeg: r.gradeDeg, cross: r.cross, piste: r.piste };
+    const base = { diff: r.diff, maxG: r.maxG, gradeDeg: r.gradeDeg, cross: r.cross, piste: r.piste, planned: r.planned };
     // detach the old segment (no refund: it is being re-used)
     this.runs.splice(this.runs.indexOf(r), 1);
     for (const n of [r.a, r.b]) n.runs = n.runs.filter((x) => x !== r);
@@ -530,7 +579,7 @@ const Game = {
 
   spend(c) { this.money -= c; this.stats.built += c; },
 
-  get open() { return Net.lifts.some((l) => l.opt.open) && Net.runs.length > 0; },
+  get open() { return Net.lifts.some((l) => l.opt.open && !l.planned) && Net.runs.some((r) => !r.planned); },
 
   forestLeft() { const t = Terrain.trees; return t ? t.left / t.total : 1; },
   // guests come for the views: clear more than 10 % of the forest and demand drops
@@ -549,7 +598,7 @@ const Game = {
 
   demandPerHour() {
     let km = 0; const kinds = new Set();
-    for (const r of Net.runs) { km += r.len / 1000; kinds.add(r.diff); }
+    for (const r of Net.runs) if (!r.planned) { km += r.len / 1000; kinds.add(r.diff); }
     const d = (30 + km * 55) * (0.35 + (1.3 * this.rep) / 100) * (0.7 + 0.15 * kinds.size) * this.scenery();
     const h = this.time / 3600, tod = h < 11 ? 1.5 : h < 13 ? 0.9 : 0.4;
     return Math.min(d * tod, this.liftCapacity() * 0.35);
@@ -575,6 +624,7 @@ const Game = {
   },
 
   stepLift(l, dt) {
+    if (l.planned) return;
     const T = l.T, open = l.opt.open, v = Lifts.speed(l), L = l.upPath.length;
     if (!open && !l.carriers.length) return;          // stopped
     l.clock += dt;
@@ -624,8 +674,8 @@ const Game = {
     const seen = new Set([node]), q = [node], max = SKILL[skill].maxDiff;
     while (q.length) {
       const n = q.shift();
-      for (const r of n.runs) if (r.a === n && r.diff <= max) return true;
-      for (const l of n.lifts) if (l.a === n && l.opt.open && !seen.has(l.b)) { seen.add(l.b); q.push(l.b); }
+      for (const r of n.runs) if (r.a === n && !r.planned && r.diff <= max) return true;
+      for (const l of n.lifts) if (l.a === n && l.opt.open && !l.planned && !seen.has(l.b)) { seen.add(l.b); q.push(l.b); }
     }
     return false;
   },
@@ -637,7 +687,7 @@ const Game = {
   },
 
   canStart(n, skill) {
-    return n.runs.some((r) => r.a === n && r.diff <= SKILL[skill].maxDiff) ||
+    return n.runs.some((r) => r.a === n && !r.planned && r.diff <= SKILL[skill].maxDiff) ||
            n.lifts.some((l) => l.a === n && l.opt.open && this.liftUseful(l, skill));
   },
 
@@ -647,7 +697,7 @@ const Game = {
     if (s.done >= s.want + 4) return this.leave(s);
     const opts = [];
     for (const r of n.runs) {
-      if (r.a !== n || r.diff > sk.maxDiff) continue;
+      if (r.a !== n || r.planned || r.diff > sk.maxDiff) continue;
       let w = 1 + sk.pref[r.diff] + (r !== s.last ? 2 : 0);
       if (tired && r.b.base) w *= 4;
       opts.push([r, w]);
@@ -706,7 +756,7 @@ const Game = {
         const steep = clamp(-p.dy / Math.max(0.2, Math.hypot(p.dx, p.dz)), 0, 1);
         s.d += SKILL[s.skill].speed * s.pace * (0.75 + 0.7 * Math.min(1, steep / 0.4)) * dt;
         if (s.d >= r.path.length) {
-          const junction = !r.b.base && !r.b.lifts.length && r.b.runs.some((x) => x.a === r.b);
+          const junction = !r.b.base && !r.b.lifts.some((x) => !x.planned) && r.b.runs.some((x) => x.a === r.b && !x.planned);
           const lean = Math.max(0, r.cross - 0.3) * (s.skill === 0 ? 30 : 15);   // tilted side-hill piste
           // enjoyment scales with the vertical skied, so splitting a piste into segments changes nothing
           const share = clamp(r.drop / 300, 0.25, 1.5);
@@ -745,9 +795,9 @@ const Game = {
   },
 
   dailyCost() {
-    let ops = Net.lifts.length || Net.runs.length ? FIXED_OP : 0;
-    for (const l of Net.lifts) ops += Lifts.dailyCost(l);
-    for (const r of Net.runs) ops += r.len * RUN_OP_PER_M;
+    let ops = Net.lifts.some((l) => !l.planned) || Net.runs.some((r) => !r.planned) ? FIXED_OP : 0;
+    for (const l of Net.lifts) if (!l.planned) ops += Lifts.dailyCost(l);
+    for (const r of Net.runs) if (!r.planned) ops += r.len * RUN_OP_PER_M;
     return ops;
   },
 
@@ -757,8 +807,8 @@ const Game = {
       rep: this.rep, debtDays: this.debtDays, stats: this.stats,
       nodes: Net.nodes.filter((n) => !n.base).map((n) => ({ id: n.id, x: n.x, z: n.z })),
       bases: Net.nodes.filter((n) => n.base).map((n) => ({ id: n.id, name: n.name })),
-      lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id, opt: l.opt, name: l.name, towers: l.customTowers })),
-      runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points, gradeDeg: r.gradeDeg, diff: r.diff, maxG: r.maxG, piste: r.piste })),
+      lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id, opt: l.opt, name: l.name, towers: l.customTowers, planned: l.planned || undefined })),
+      runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points, gradeDeg: r.gradeDeg, diff: r.diff, maxG: r.maxG, piste: r.piste, planned: r.planned || undefined })),
       trees: Terrain.treeMask(),
       earthworks: this.earthworks,
     };
@@ -775,12 +825,15 @@ const Game = {
     for (const l of d.lifts) {
       const plan = Net.liftPlan(l.type, P(byId.get(l.a)), P(byId.get(l.b)), true);
       if (l.towers) plan.customTowers = l.towers;
+      plan.planned = !!l.planned;
       Net.buildLift(plan, true, l.opt, l.name);
     }
     for (const r of d.runs) {
       const pts = r.points.map((p) => ({ ...p }));
       pts[0].node = byId.get(r.a); pts[pts.length - 1].node = byId.get(r.b);
-      const plan = Net.runPlan(pts, true);   // terrain is already graded; recompute on the real surface
+      // built runs: the terrain is already graded, recompute on the real surface; graded plans: target profile
+      const plan = Net.runPlan(pts, true, r.planned ? r.gradeDeg : null);
+      plan.planned = !!r.planned;
       if (plan.dense) {
         if (r.gradeDeg) plan.gradeDeg = r.gradeDeg;
         if (r.diff != null) { plan.diff = r.diff; plan.maxG = r.maxG; }
@@ -835,6 +888,7 @@ const Game = {
       if (model === 'chair6') cm.bubble.setMatrixAt(cnt.bubble++, M);
     };
     for (const l of Net.lifts) {
+      if (l.planned) continue;
       const T = l.T, L = l.upPath.length, { ux, uz, px, pz } = l.dir, v = Lifts.speed(l);
       if (T.kind === 'tram') {
         // cabin A on the uphill track, cabin B mirrored on the other one

@@ -37,6 +37,7 @@
       <button data-speed="2">2×</button>
       <button data-speed="4">4×</button>
     </span>
+    <button id="plans-btn" title="Planned lifts and runs">📐 Plans</button>
     <button id="earthworks" title="Show all terraforming: red = dug away, blue = filled">⛏ Earthworks</button>
     <button id="contours" title="Height lines every 50 m, bold every 250 m (H)">≋ Height lines</button>
     <button id="to-menu" title="Back to resort selection">Menu</button>
@@ -48,6 +49,7 @@
     <button data-tool="run" title="3 · €25/m"><span>〰</span>Ski run</button>
     <button data-tool="cut" title="4 · €150 per tree"><span>🪓</span>Cut trees</button>
     <button data-tool="bulldoze" title="5 · 50% refund"><span>✕</span>Remove</button>
+    <button id="plan-mode" title="New lifts and runs become plans: free to place and change, built later from the Plans panel"><span>📐</span>Plan only</button>
     <div class="legend" id="slope-legend" hidden>
       <b>Slope map</b>
       <div><i style="background:#8cb8ff"></i>≤ 25% blue</div>
@@ -88,7 +90,8 @@
     <label class="slider" id="lp-density-row">Carriers on the line <input type="range" id="lp-density" min="40" max="100" step="10"><span id="lp-density-v"></span></label>
     <p class="dim small">Slower and fewer carriers cut running costs but lower capacity.</p>
     <div id="lp-inspect"></div>
-    <label class="toggle"><input type="checkbox" id="lp-open"> Open for skiers</label>
+    <div id="lp-plan" hidden><p class="plan-tag">📐 This lift is only a plan. Skiers can't use it until you build it.</p><button id="lp-build" class="primary-btn"></button></div>
+    <label class="toggle" id="lp-open-row"><input type="checkbox" id="lp-open"> Open for skiers</label>
     <button id="lp-pylons" class="ghost-btn">⊥ Edit pylons</button>
     <div class="lp-up"><select id="lp-up" aria-label="Upgrade to"></select><button id="lp-up-go">Upgrade</button></div>
     <p id="lp-up-msg" class="neg small"></p>
@@ -112,6 +115,13 @@
   <div id="profile-dock" hidden>
     <div class="pd-head"><b>Side view</b><span class="dim">Click to add a pylon at that height · drag a pylon left/right to move it and up/down to change its height · right-click removes it</span></div>
     <canvas id="profile"></canvas>
+  </div>
+
+  <div id="plans-panel" class="side-panel" hidden>
+    <div class="ph"><b style="flex:1">📐 Plans</b><button id="plans-close" aria-label="Close">✕</button></div>
+    <div id="plans-list"></div>
+    <div class="row"><span>Total</span><b id="plans-total"></b></div>
+    <button id="plans-build-all" class="primary-btn">Build all</button>
   </div>
 
   <div id="danger" hidden></div>

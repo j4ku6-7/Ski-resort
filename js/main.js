@@ -48,7 +48,7 @@ const UI = {
 
 const App = {
   tool: 'select', draft: null, hover: null, preview: null, liftType: 'chair4', panelLift: null,
-  grading: false, holdAngle: false, gradeDeg: 13, manualPylons: false, edit: null,
+  grading: false, holdAngle: false, gradeDeg: 13, manualPylons: false, edit: null, planMode: false,
 
   init() {
     const menu = $('#resorts');
@@ -145,6 +145,7 @@ const App = {
     this.bindPylonPanel();
     this.bindProfile();
     this.bindRunOptions();
+    this.refreshPlans();
     let contours = false;
     try { contours = localStorage.getItem('skiresort.contours') === '1'; } catch { /* ignore */ }
     this.toggleContours(contours);
@@ -222,6 +223,10 @@ const App = {
     $('#finish-run').onclick = () => this.finishRun();
     $('#contours').onclick = () => this.toggleContours();
     $('#earthworks').onclick = () => this.toggleEarthworks();
+    $('#plan-mode').onclick = () => this.setPlanMode(!this.planMode);
+    $('#plans-btn').onclick = () => { $('#plans-panel').hidden = !$('#plans-panel').hidden; this.refreshPlans(); };
+    $('#plans-close').onclick = () => { $('#plans-panel').hidden = true; };
+    $('#plans-build-all').onclick = () => this.buildAllPlans();
     $('#grade-it').onclick = () => { this.grading = true; this.syncRunOptions(); };
 
     addEventListener('keydown', (e) => {
@@ -337,7 +342,8 @@ const App = {
       tt.innerHTML = `<b style="color:${e.diff === 2 ? '#fff' : DIFF[e.diff].css}">${e.name} · ${DIFF[e.diff].name}</b><br>
         ${(e.len / 1000).toFixed(2)} km · drop ${fmt(e.drop)} m<br>steepest ${Math.round(e.maxG * 100)}%`;
     }
-    if (this.tool === 'bulldoze') tt.innerHTML += `<br><span class="neg">Click to remove · refund ${money(e.cost / 2)}</span>`;
+    if (e.planned) tt.innerHTML += `<br><span class="plan-tag">📐 plan · about ${money(Net.planCost(e).total)} to build</span>`;
+    if (this.tool === 'bulldoze') tt.innerHTML += e.planned ? '<br><span class="neg">Click to delete this plan</span>' : `<br><span class="neg">Click to remove · refund ${money(e.cost / 2)}</span>`;
     tt.style.left = this.mouse.x + 16 + 'px'; tt.style.top = this.mouse.y + 16 + 'px';
     tt.hidden = false;
   },
@@ -372,7 +378,7 @@ const App = {
       const T = LIFT_TYPES[this.liftType];
       if (!d.a) hint = `<b>${T.name}</b>: click the bottom station, snapping to a lodge or run end. Pick another type on the right.`;
       else if (h) {
-        const plan = Net.liftPlan(this.liftType, d.a, h, false, this.manualPylons);
+        const plan = Net.liftPlan(this.liftType, d.a, h, this.planMode, this.manualPylons);
         const pa = plan.a, pb = plan.b;
         const { pts } = Lifts.previewGeometry(T, pa, Net.pointY(pa), pb, Net.pointY(pb), plan.manual ? [] : null);
         this.liftLine.geometry.dispose();
@@ -391,7 +397,7 @@ const App = {
         ? `Start here to <b>branch off ${h.junction.run.name}</b>. Skiers can choose either way at the junction.`
         : 'Drag from a lift top, or from the middle of a piste to branch off, down the slope. The map shows the steepness. <span class="dim">Right-drag to rotate.</span>';
       else if (pts.length >= 2) {
-        const plan = Net.runPlan(pts, false, this.grade());
+        const plan = Net.runPlan(pts, this.planMode, this.grade());
         if (plan.dense) {
           this.preview = makeRibbon(plan.dense, null, 0.7, plan.gradeDeg ? GRADE_HALF * 2 : RUN_WIDTH, plan.colors, !!plan.gradeDeg);
           if (plan.gradeDeg) { this.preview.material.depthTest = false; this.preview.renderOrder = 9; }
@@ -413,6 +419,7 @@ const App = {
         else this.clearEarthPreview();
       }
     } else this.clearEarthPreview();
+    if (this.planMode && (t === 'lift' || t === 'run')) hint = '<b class="plan-tag">📐 PLANNING</b> nothing is paid until you build it from the Plans panel · ' + hint;
     $('#hint').innerHTML = hint + (at ? ' ' + at : '');
   },
 
@@ -420,7 +427,7 @@ const App = {
     const h = this.hover, t = this.tool, d = this.draft;
     if (t === 'bulldoze') {
       const e = h && Net.edgeNear(h.x, h.z);
-      if (e) { if (e === this.panelLift) this.closeLiftPanel(); Net.remove(e); UI.toast(`Removed ${e.name}`); Save.write(); }
+      if (e) { if (e === this.panelLift) this.closeLiftPanel(); Net.remove(e); UI.toast(e.planned ? `Deleted the plan for ${e.name}` : `Removed ${e.name}`); Save.write(); this.refreshPlans(); }
     } else if (t === 'pylons' && this.edit) {
       const e = this.edit;
       if (e.hover != null) e.sel = e.hover;
@@ -436,10 +443,12 @@ const App = {
     } else if (t === 'lift' && h) {
       if (!d.a) d.a = { ...h };
       else {
-        const plan = Net.liftPlan(this.liftType, d.a, h, false, this.manualPylons);
+        const plan = Net.liftPlan(this.liftType, d.a, h, this.planMode, this.manualPylons);
         if (!plan.ok) return UI.toast(plan.msg);
+        plan.planned = this.planMode;
         const l = Net.buildLift(plan);
-        UI.toast(`${l.name} ${l.T.name} built for ${money(plan.cost)}`);
+        UI.toast(plan.planned ? `📐 Planned ${l.name} ${l.T.name}: about ${money(plan.cost)} when you build it` : `${l.name} ${l.T.name} built for ${money(plan.cost)}`);
+        this.refreshPlans();
         Save.write();
         this.draft = { a: null };
         if (plan.manual) { l.awaitInspection = true; return this.openPylons(l); }
@@ -550,6 +559,64 @@ const App = {
     sync();
   },
 
+  // ---------- plans ----------
+  setPlanMode(on) {
+    this.planMode = on;
+    $('#plan-mode').classList.toggle('active', on);
+    this.updateHover();
+  },
+
+  buildPlan(e) {
+    const r = Net.confirmPlan(e);
+    if (!r.ok) return UI.toast(r.msg);
+    UI.toast(`🏗 Built ${e.name} for ${money(r.cost)}${r.issues.length ? `, but it failed inspection and stays closed: ${r.issues[0]}` : ''}`);
+    if (this.earthOn) this.refreshEarthworks();
+    Save.write();
+    this.refreshPlans();
+    if (this.panelLift === e) this.openLiftPanel(e);
+  },
+
+  buildAllPlans() {
+    let n = 0, spent = 0;
+    for (const e of Net.plans()) {
+      const r = Net.confirmPlan(e);
+      if (!r.ok) { UI.toast(`${r.msg}. Stopped after ${n} build${n === 1 ? '' : 's'}.`); break; }
+      n++; spent += r.cost;
+    }
+    if (n) UI.toast(`🏗 Built ${n} planned item${n === 1 ? '' : 's'} for ${money(spent)}`);
+    if (this.earthOn) this.refreshEarthworks();
+    Save.write();
+    this.refreshPlans();
+  },
+
+  refreshPlans() {
+    const plans = Net.plans();
+    $('#plans-btn').textContent = `📐 Plans${plans.length ? ` (${plans.length})` : ''}`;
+    if ($('#plans-panel').hidden) return;
+    let total = 0;
+    $('#plans-list').innerHTML = plans.length ? '' : '<p class="dim small">No plans yet. Switch on <b>📐 Plan only</b> in the toolbar and place lifts or runs. Nothing is paid until you build them here.</p>';
+    plans.forEach((e, i) => {
+      const c = Net.planCost(e); total += c.total;
+      const what = e.kind === 'lift' ? `${e.T.icon} ${e.T.name} · ${fmt(e.len)} m` : `${DIFF[e.diff].name} run · ${fmt(e.len)} m${e.gradeDeg ? ` · graded ≤ ${e.gradeDeg}°` : ''}`;
+      const warn = e.kind === 'lift' && e.issues && e.issues.length ? `<span class="neg small">⚠ would fail inspection</span>` : '';
+      const row = document.createElement('div');
+      row.className = 'plan-row';
+      row.innerHTML = `<div><b>${e.name}</b> <span class="dim small">${what}</span><br>${money(c.total)} ${warn}</div>
+        <div class="plan-btns"><button data-a="show" title="Show">◎</button><button data-a="build">Build</button><button data-a="del" title="Delete plan">✕</button></div>`;
+      row.querySelector('[data-a="show"]').onclick = () => {
+        const m = e.kind === 'lift' ? { x: (e.a.x + e.b.x) / 2, z: (e.a.z + e.b.z) / 2 } : e.dense[e.dense.length >> 1];
+        this.flyTo({ x: m.x, y: Terrain.height(m.x, m.z), z: m.z }, Math.max(500, e.len * 0.9));
+        if (e.kind === 'lift') this.openLiftPanel(e);
+      };
+      row.querySelector('[data-a="build"]').onclick = () => this.buildPlan(e);
+      row.querySelector('[data-a="del"]').onclick = () => { if (this.panelLift === e) this.closeLiftPanel(); Net.remove(e); Save.write(); this.refreshPlans(); };
+      $('#plans-list').appendChild(row);
+    });
+    $('#plans-total').innerHTML = `${money(total)}${total > Game.money ? ' <span class="neg">(more than you have)</span>' : ''}`;
+    $('#plans-build-all').disabled = !plans.length;
+    $('#plans-build-all').textContent = plans.length ? `Build all · ${money(total)}` : 'Build all';
+  },
+
   // ---------- pylon editor ----------
   minPylon(T) { return Math.max(4, Math.round(T.towerH * 0.5)); },
 
@@ -648,9 +715,9 @@ const App = {
 
   refreshPylonPanel() {
     const e = this.edit, l = e.l, T = l.T;
-    $('#pp-title').textContent = `${l.name} · ${T.name} pylons`;
+    $('#pp-title').textContent = `${l.name} · ${T.name} pylons${l.planned ? ' (plan)' : ''}`;
     $('#pp-count').textContent = e.towers.length;
-    const diff = Lifts.towersValue(T, e.towers) - e.origValue;
+    const diff = l.planned ? 0 : Lifts.towersValue(T, e.towers) - e.origValue;
     $('#pp-cost').innerHTML = Math.abs(diff) < 1 ? '—' : diff > 0 ? `<span class="neg">${money(-diff)}</span>` : `<span class="pos">refund ${money(-diff / 2)}</span>`;
     $('#pp-issues').innerHTML = l.issues.length
       ? l.issues.map((i) => `<p class="danger">⚠ ${i}</p>`).join('') + '<p class="dim small">The lift stays closed until it passes inspection.</p>'
@@ -803,12 +870,13 @@ const App = {
 
   finishPylons() {
     const e = this.edit, l = e.l, T = l.T;
-    const diff = Lifts.towersValue(T, e.towers) - e.origValue;
+    const diff = l.planned ? 0 : Lifts.towersValue(T, e.towers) - e.origValue;
     if (diff > 0 && diff > Game.money) return UI.toast(`Not enough money for these pylons (${money(diff)}).`);
     if (diff > 0) Game.spend(diff); else Game.money -= diff / 2;
     this.edit = null;
     this.drawPylonOverlay();
-    if (l.issues.length) UI.toast(`${l.name} failed the safety inspection and stays closed: ${l.issues[0]}.`);
+    if (l.planned) UI.toast(`📐 ${l.name} plan updated${l.issues.length ? `. It would fail inspection: ${l.issues[0]}` : '. It would pass inspection'}.`);
+    else if (l.issues.length) UI.toast(`${l.name} failed the safety inspection and stays closed: ${l.issues[0]}.`);
     else {
       if (e.wasOpen) Net.setLiftOpen(l, true);
       l.awaitInspection = false;
@@ -879,7 +947,7 @@ const App = {
     const l = this.panelLift;
     if (!l || !Net.lifts.includes(l)) return this.closeLiftPanel();
     const T = l.T;
-    $('#lp-type').textContent = `${T.icon} ${T.name}`;
+    $('#lp-type').textContent = `${T.icon} ${T.name}${l.planned ? ' · 📐 planned' : ''}`;
     $('#lp-speed-v').textContent = `${(Lifts.speed(l)).toFixed(1)} m/s`;
     $('#lp-density-v').textContent = `${Math.round(l.opt.density * 100)}%`;
     $('#lp-stats').innerHTML = `
@@ -889,13 +957,18 @@ const App = {
       <div class="row"><span>Ride time</span><b>${(Lifts.rideTime(l) / 60).toFixed(1)} min</b></div>
       <div class="row"><span>Queue</span><b>${l.queue.length}${l.queue.length ? ` · ~${Math.round(Lifts.waitTime(l) / 60)} min` : ''}</b></div>
       <div class="row"><span>Rides today</span><b>${fmt(l.ridesToday)}${l.ridesYesterday != null ? ` <small>(yesterday ${fmt(l.ridesYesterday)})</small>` : ''}</b></div>
-      <div class="row"><span>Running cost</span><b class="neg">${money(-Lifts.dailyCost(l))}/day</b></div>`;
+      <div class="row"><span>Running cost</span><b class="neg">${money(-Lifts.dailyCost(l))}/day${l.planned ? ' <small>(once built)</small>' : ''}</b></div>`;
     const plan = Net.upgradePlan(l, $('#lp-up').value);
-    $('#lp-up-go').textContent = plan.ok ? `Upgrade · ${money(plan.cost)}` : 'Upgrade';
+    $('#lp-up-go').textContent = plan.ok ? (l.planned ? 'Change type' : `Upgrade · ${money(plan.cost)}`) : 'Upgrade';
     $('#lp-up-go').disabled = !plan.ok;
     $('#lp-up-msg').textContent = plan.ok ? '' : plan.msg;
     $('#lp-remove').textContent = `Remove lift (refund ${money(l.cost / 2)})`;
-    $('#lp-inspect').innerHTML = l.issues && l.issues.length ? `<p class="danger">⚠ Failed safety inspection: ${l.issues.join('; ')}</p>` : '';
+    $('#lp-inspect').innerHTML = l.issues && l.issues.length ? `<p class="danger">⚠ ${l.planned ? 'Would fail' : 'Failed'} safety inspection: ${l.issues.join('; ')}</p>` : '';
+    $('#lp-plan').hidden = !l.planned;
+    $('#lp-open-row').hidden = !!l.planned;
+    if (l.planned) $('#lp-build').textContent = `Build it · ${money(Net.planCost(l).total)}`;
+    $('#lp-remove').hidden = false;
+    if (l.planned) $('#lp-remove').textContent = 'Delete plan';
     $('#lp-pylons').hidden = l.T.kind === 'belt';
   },
 
@@ -918,13 +991,14 @@ const App = {
       UI.toast(`${l.name}: ${from} → ${l.T.name} for ${money(plan.cost)}`);
       Save.write(); this.openLiftPanel(l);
     };
+    $('#lp-build').onclick = () => this.buildPlan(L());
     $('#lp-remove').onclick = () => {
       const l = L();
       if (!$('#lp-remove').classList.contains('confirm')) {
         $('#lp-remove').classList.add('confirm'); $('#lp-remove').textContent = 'Click again to remove'; return;
       }
       $('#lp-remove').classList.remove('confirm');
-      this.closeLiftPanel(); Net.remove(l); UI.toast(`Removed ${l.name}`); Save.write();
+      this.closeLiftPanel(); Net.remove(l); UI.toast(`Removed ${l.name}`); Save.write(); this.refreshPlans();
     };
   },
 
@@ -967,10 +1041,12 @@ const App = {
   finishRun() {
     const d = this.draft;
     if (this.tool !== 'run' || !d || d.pts.length < 2) return;
-    const plan = Net.runPlan(d.pts, false, this.grade());
+    const plan = Net.runPlan(d.pts, this.planMode, this.grade());
     if (!plan.ok) { d.pts.pop(); this.updateHover(); return UI.toast(plan.msg); }
+    plan.planned = this.planMode;
     const r = Net.buildRun(plan);
-    UI.toast(`${r.name} (${DIFF[r.diff].name}) built for ${money(plan.cost)}`);
+    UI.toast(plan.planned ? `📐 Planned ${r.name} (${DIFF[r.diff].name}): about ${money(plan.cost)} when you build it` : `${r.name} (${DIFF[r.diff].name}) built for ${money(plan.cost)}`);
+    this.refreshPlans();
     this.clearEarthPreview();
     if (plan.gradeDeg) this.refreshEarthworks();
     Save.write();
@@ -1079,6 +1155,7 @@ const App = {
       }
     }
     if (this.panelLift) this.refreshLiftPanel();
+    if ((this.planTimer = (this.planTimer || 0) + 1) % 8 === 0) this.refreshPlans();
   },
 };
 

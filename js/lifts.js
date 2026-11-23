@@ -308,6 +308,7 @@ const Lifts = {
       l.upPath = new Path(line.map((p) => ({ ...p, y: p.y + 0.5 })));
       l.downPath = l.upPath;
       l.vis = g;
+      if (l.planned) this.ghostify(g);
       return;
     }
 
@@ -372,6 +373,20 @@ const Lifts = {
       l.downPath = new Path(down);
     }
     l.vis = g;
+    if (l.planned) this.ghostify(g);
+  },
+
+  // blueprint look for planned lifts
+  ghostify(g) {
+    if (!this.M.ghost) {
+      this.M.ghost = new THREE.MeshBasicMaterial({ color: 0x58a6ff, transparent: true, opacity: 0.38, depthWrite: false });
+      this.M.ghostLine = new THREE.LineBasicMaterial({ color: 0x58a6ff, transparent: true, opacity: 0.8 });
+      this.shared.add(this.M.ghost); this.shared.add(this.M.ghostLine);
+    }
+    g.traverse((o) => {
+      if (o.isLine) o.material = this.M.ghostLine;
+      else if (o.isMesh) { if (o.material && !this.shared.has(o.material)) o.material.dispose(); o.material = this.M.ghost; }
+    });
   },
 
   dispose(obj) {

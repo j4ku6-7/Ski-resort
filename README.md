@@ -40,6 +40,8 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
    - Experts ski all runs.
 4. Skiers lose happiness from long queues, from dead ends (they have to walk back), and from having nothing they can ski. Happiness drives reputation, and reputation drives visitor numbers.
 
+**Planning:** switch on **📐 Plan only** in the toolbar, and new lifts and runs become blueprints, drawn as blue ghosts. Plans are free: they cut no trees, move no earth, and skiers ignore them. You can still change a planned lift's type, edit its pylons, or delete the plan. The **📐 Plans** panel in the top bar lists every plan with its current price and any inspection problems, and builds them one at a time or all at once. Building pays the real cost at that moment, then fells the trees and does the earthworks. Plans are saved.
+
 **Camera:** drag to rotate, right-drag to pan, and scroll to zoom toward the cursor. WASD or the arrow keys move, Q/E turn, and double-click (in View mode) flies there.
 
 Keys: `1`–`5` pick tools, `H` toggles height lines (a thin line every 50 m, bold every 250 m), `Esc` cancels, `Backspace` removes the last run point, `[` `]` change the tree brush size, `Space` pauses.

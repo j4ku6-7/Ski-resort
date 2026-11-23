@@ -163,3 +163,20 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 .label.pylon { background: rgba(20,28,40,.8); color: #fff; font-size: 11px; }
 .label.pylon.sel { background: #0aa8d6; }
 @media (max-width: 760px) { #profile-dock { left: 10px; right: 10px; bottom: 120px; height: 170px; } }
+
+/* ---------- plans ---------- */
+#plan-mode { display: grid; justify-items: center; gap: 2px; padding: 9px 4px; border: 2px dashed #58a6ff; border-radius: 10px; background: rgba(255,255,255,.88); }
+#plan-mode span { font-size: 20px; line-height: 1; }
+#plan-mode.active { background: #58a6ff; color: #fff; border-style: solid; }
+#plans-btn { border: 0; background: #e8eef5; padding: 6px 10px; border-radius: 7px; }
+.plan-tag { color: #2f7de1; font-weight: 600; }
+#hint .plan-tag { color: #8cc4ff; }
+#plans-panel .row { display: flex; justify-content: space-between; padding: 8px 0 4px; font-size: 14px; }
+.plan-row { display: flex; gap: 8px; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eef1f5; font-size: 13px; }
+.plan-btns { display: flex; gap: 4px; }
+.plan-btns button { border: 0; border-radius: 7px; padding: 5px 8px; background: #e8eef5; }
+.plan-btns button[data-a="build"] { background: #1f6feb; color: #fff; font-weight: 600; }
+.primary-btn { width: 100%; margin-top: 8px; border: 0; border-radius: 9px; padding: 9px; background: #1f6feb; color: #fff; font-weight: 700; }
+.primary-btn:disabled { background: #aab6c4; }
+.label.run.planned { opacity: .6; outline: 2px dashed #58a6ff; }
+#plans-panel { right: auto; left: 140px; }
