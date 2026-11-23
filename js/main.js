@@ -47,7 +47,7 @@ const UI = {
 };
 
 const App = {
-  tool: 'select', draft: null, hover: null, preview: null,
+  tool: 'select', draft: null, hover: null, preview: null, liftType: 'chair4', panelLift: null,
 
   init() {
     const menu = $('#resorts');
@@ -124,8 +124,7 @@ const App = {
     this.snapRing = new THREE.Mesh(new THREE.RingGeometry(SNAP - 8, SNAP, 40).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0x3dff9a, depthTest: false, transparent: true, opacity: 0.8 }));
     this.snapRing.renderOrder = 10; scene.add(this.snapRing);
-    this.liftLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
-      new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false }));
+    this.liftLine = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false }));
     this.liftLine.renderOrder = 11; this.liftLine.visible = false; scene.add(this.liftLine);
 
     this.brush = 45;
@@ -137,6 +136,8 @@ const App = {
     this.steepLabel = Labels.add('', 'steep', this.steepPos); this.steepLabel.show(false);
 
     this.bindInput();
+    this.bindLiftPanel();
+    this.buildLiftPicker();
     $('#resort-name').textContent = map.name;
     this.setTool('select');
     this.last = performance.now();
@@ -191,7 +192,7 @@ const App = {
 
     addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT') return;
-      const keys = { '1': 'select', '2': 'chair', '3': 'gondola', '4': 'run', '5': 'cut', '6': 'bulldoze' };
+      const keys = { '1': 'select', '2': 'lift', '3': 'run', '4': 'cut', '5': 'bulldoze' };
       if (keys[e.key]) this.setTool(keys[e.key]);
       else if (e.key === '[' || e.key === ']') {
         this.brush = clamp(this.brush + (e.key === ']' ? 10 : -10), 20, 120);
@@ -206,7 +207,8 @@ const App = {
 
   setTool(t) {
     this.tool = t;
-    this.draft = t === 'chair' || t === 'gondola' ? { a: null } : t === 'run' ? { pts: [] } : null;
+    this.draft = t === 'lift' ? { a: null } : t === 'run' ? { pts: [] } : null;
+    $('#lift-types').hidden = t !== 'lift';
     for (const b of document.querySelectorAll('[data-tool]')) b.classList.toggle('active', b.dataset.tool === t);
     const drawing = t === 'run' || t === 'cut';
     Terrain.showSlopeMap(t === 'run');
@@ -252,7 +254,7 @@ const App = {
   updateHover() {
     if (!this.camera) return;
     const hit = this.pickTerrain();
-    const building = this.tool === 'chair' || this.tool === 'gondola' || this.tool === 'run';
+    const building = this.tool === 'lift' || this.tool === 'run';
     this.hover = null; this.snapRing.visible = false; this.cursor.visible = !!hit;
     $('#tooltip').hidden = true;
     if (hit) {
@@ -271,8 +273,11 @@ const App = {
     const tt = $('#tooltip');
     if (!e || !this.mouse) return;
     if (e.kind === 'lift') {
-      tt.innerHTML = `<b>${e.name} · ${e.T.name}</b><br>${fmt(e.len)} m long · climbs ${fmt(e.vert)} m<br>
-        ${fmt((e.T.seats / e.T.interval) * 3600)} skiers/h · queue ${e.queue.length}`;
+      tt.innerHTML = `<b>${e.name} · ${e.T.name}</b>${e.opt.open ? '' : ' <span class="neg">CLOSED</span>'}<br>
+        ${fmt(e.len)} m long · climbs ${fmt(e.vert)} m · ${e.towers} towers<br>
+        ${fmt(Lifts.capacity(e))} skiers/h · ride ${(Lifts.rideTime(e) / 60).toFixed(1)} min<br>
+        queue ${e.queue.length}${e.queue.length ? ` · wait ~${Math.round(Lifts.waitTime(e) / 60)} min` : ''}` +
+        (this.tool === 'select' ? '<br><span class="dim">Click for options</span>' : '');
     } else {
       tt.innerHTML = `<b style="color:${e.diff === 2 ? '#fff' : DIFF[e.diff].css}">${e.name} · ${DIFF[e.diff].name}</b><br>
         ${(e.len / 1000).toFixed(2)} km · drop ${fmt(e.drop)} m<br>steepest ${Math.round(e.maxG * 100)}%`;
@@ -294,25 +299,27 @@ const App = {
     let hint = '';
     const at = h ? `<span class="dim">${Math.round(Terrain.elev(h.y))} m · slope ${Math.round(Terrain.slope(h.x, h.z) * 100)}%</span>` : '';
     $('#finish-run').hidden = true;
-    if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom. Pick a tool to build.';
+    if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom · click a lift for its options.';
     else if (t === 'bulldoze') hint = 'Click a lift or run to remove it (50% refund).';
     else if (t === 'cut') {
       const n = h ? Terrain.treesNear([h], this.brush).length : 0;
       hint = `Click or drag to fell trees · ${n} under the brush · <b>${money(n * TREE_COST)}</b> · <span class="dim">[ ] brush size · right-drag to rotate</span>` +
         `<br><span class="dim">Forest left: ${Math.round(Game.forestLeft() * 100)}%. Clear more than 10% and the views suffer, so fewer visitors come.</span>`;
     }
-    else if (t === 'chair' || t === 'gondola') {
-      const T = LIFT_TYPES[t];
-      if (!d.a) hint = `Click the bottom station of the ${T.name.toLowerCase()} — snap to a lodge or a run end.`;
+    else if (t === 'lift') {
+      const T = LIFT_TYPES[this.liftType];
+      if (!d.a) hint = `<b>${T.name}</b>: click the bottom station, snapping to a lodge or run end. Pick another type on the right.`;
       else if (h) {
-        const plan = Net.liftPlan(t, d.a, h);
-        const ya = Net.pointY(d.a), yb = h.y;
-        const pos = this.liftLine.geometry.attributes.position;
-        pos.setXYZ(0, d.a.x, ya + T.towerH, d.a.z); pos.setXYZ(1, h.x, yb + T.towerH, h.z); pos.needsUpdate = true;
-        this.liftLine.geometry.computeBoundingSphere();
+        const plan = Net.liftPlan(this.liftType, d.a, h);
+        const pa = plan.a, pb = plan.b;
+        const { pts } = Lifts.previewGeometry(T, pa, Net.pointY(pa), pb, Net.pointY(pb));
+        this.liftLine.geometry.dispose();
+        this.liftLine.geometry = new THREE.BufferGeometry();
+        this.liftLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
         this.liftLine.material.color.set(plan.ok ? 0x3dff9a : 0xff4d4d);
         this.liftLine.visible = true;
-        hint = `${fmt(plan.len)} m · climbs ${fmt(plan.vert)} m · <b>${money(plan.cost)}</b>` +
+        const cap = (T.seats / (T.kind === 'tram' ? 2 * (plan.len / T.speed + T.dwell) : T.interval)) * 3600;
+        hint = `${fmt(plan.len)} m · climbs ${fmt(plan.vert)} m · ${plan.towers} towers · ${fmt(cap)} skiers/h · ride ${(plan.len / T.speed / 60).toFixed(1)} min · <b>${money(plan.cost)}</b>` +
           (plan.trees ? ` <span class="dim">(incl. ${plan.trees} trees to fell)</span>` : '') +
           (plan.ok ? ' — click to build' : ` — <span class="neg">${plan.msg}</span>`) + ' · Esc to cancel';
       }
@@ -342,11 +349,14 @@ const App = {
     const h = this.hover, t = this.tool, d = this.draft;
     if (t === 'bulldoze') {
       const e = h && Net.edgeNear(h.x, h.z);
-      if (e) { Net.remove(e); UI.toast(`Removed ${e.name}`); Save.write(); }
-    } else if ((t === 'chair' || t === 'gondola') && h) {
+      if (e) { if (e === this.panelLift) this.closeLiftPanel(); Net.remove(e); UI.toast(`Removed ${e.name}`); Save.write(); }
+    } else if (t === 'select') {
+      const e = h && Net.edgeNear(h.x, h.z);
+      if (e && e.kind === 'lift') this.openLiftPanel(e); else this.closeLiftPanel();
+    } else if (t === 'lift' && h) {
       if (!d.a) d.a = { ...h };
       else {
-        const plan = Net.liftPlan(t, d.a, h);
+        const plan = Net.liftPlan(this.liftType, d.a, h);
         if (!plan.ok) return UI.toast(plan.msg);
         const l = Net.buildLift(plan);
         UI.toast(`${l.name} ${l.T.name} built for ${money(plan.cost)}`);
@@ -364,6 +374,86 @@ const App = {
       if (d.pts.length >= 2 && h.node && h.node !== d.pts[0].node) return this.finishRun();
     }
     this.updateHover();
+  },
+
+  buildLiftPicker() {
+    const box = $('#lift-types');
+    box.innerHTML = '<b class="pk-title">Lift type</b>';
+    for (const [key, T] of Object.entries(LIFT_TYPES)) {
+      const cap = T.kind === 'tram' ? 'about 400' : fmt((T.seats / T.interval) * 3600);
+      const b = document.createElement('button');
+      b.className = 'pick' + (key === this.liftType ? ' active' : '');
+      b.innerHTML = `<span class="pk-ico">${T.icon}</span><span class="pk-name">${T.name}</span>
+        <span class="pk-meta">${cap}/h · ${T.speed} m/s · ≤ ${fmt(T.maxLen)} m${T.cold === 0 ? ' · enclosed' : ''}</span>
+        <span class="pk-meta">${money(T.baseCost)} + €${T.perM}/m${T.towerCost ? ` + ${money(T.towerCost)}/tower` : ''}</span>
+        <span class="pk-desc">${T.desc}</span>`;
+      b.onclick = () => { this.liftType = key; this.buildLiftPicker(); this.updateHover(); };
+      box.appendChild(b);
+    }
+  },
+
+  openLiftPanel(l) {
+    this.panelLift = l;
+    const p = $('#lift-panel'), T = l.T;
+    $('#lp-name').value = l.name;
+    $('#lp-speed').value = Math.round(l.opt.speed * 100);
+    $('#lp-density').value = Math.round(l.opt.density * 100);
+    $('#lp-density-row').hidden = T.kind === 'tram' || T.kind === 'belt';
+    $('#lp-open').checked = l.opt.open;
+    const sel = $('#lp-up');
+    sel.innerHTML = Object.entries(LIFT_TYPES).filter(([k]) => k !== l.type)
+      .map(([k, t]) => `<option value="${k}">${t.name}</option>`).join('');
+    p.hidden = false;
+    this.refreshLiftPanel();
+  },
+  closeLiftPanel() { this.panelLift = null; $('#lift-panel').hidden = true; },
+
+  refreshLiftPanel() {
+    const l = this.panelLift;
+    if (!l || !Net.lifts.includes(l)) return this.closeLiftPanel();
+    const T = l.T;
+    $('#lp-type').textContent = `${T.icon} ${T.name}`;
+    $('#lp-speed-v').textContent = `${(Lifts.speed(l)).toFixed(1)} m/s`;
+    $('#lp-density-v').textContent = `${Math.round(l.opt.density * 100)}%`;
+    $('#lp-stats').innerHTML = `
+      <div class="row"><span>Length / climb</span><b>${fmt(l.len)} m / ${fmt(l.vert)} m</b></div>
+      <div class="row"><span>Towers</span><b>${l.towers}</b></div>
+      <div class="row"><span>Capacity</span><b>${fmt(Lifts.capacity(l))} skiers/h</b></div>
+      <div class="row"><span>Ride time</span><b>${(Lifts.rideTime(l) / 60).toFixed(1)} min</b></div>
+      <div class="row"><span>Queue</span><b>${l.queue.length}${l.queue.length ? ` · ~${Math.round(Lifts.waitTime(l) / 60)} min` : ''}</b></div>
+      <div class="row"><span>Rides today</span><b>${fmt(l.ridesToday)}${l.ridesYesterday != null ? ` <small>(yesterday ${fmt(l.ridesYesterday)})</small>` : ''}</b></div>
+      <div class="row"><span>Running cost</span><b class="neg">${money(-Lifts.dailyCost(l))}/day</b></div>`;
+    const plan = Net.upgradePlan(l, $('#lp-up').value);
+    $('#lp-up-go').textContent = plan.ok ? `Upgrade · ${money(plan.cost)}` : 'Upgrade';
+    $('#lp-up-go').disabled = !plan.ok;
+    $('#lp-up-msg').textContent = plan.ok ? '' : plan.msg;
+    $('#lp-remove').textContent = `Remove lift (refund ${money(l.cost / 2)})`;
+  },
+
+  bindLiftPanel() {
+    const L = () => this.panelLift;
+    $('#lp-close').onclick = () => this.closeLiftPanel();
+    $('#lp-name').oninput = (e) => { if (L()) L().name = e.target.value.slice(0, 24) || L().name; };
+    $('#lp-name').onchange = () => Save.write();
+    $('#lp-speed').oninput = (e) => { L().opt.speed = e.target.value / 100; this.refreshLiftPanel(); };
+    $('#lp-density').oninput = (e) => { L().opt.density = e.target.value / 100; this.refreshLiftPanel(); };
+    for (const id of ['#lp-speed', '#lp-density']) $(id).onchange = () => Save.write();
+    $('#lp-open').onchange = (e) => { Net.setLiftOpen(L(), e.target.checked); Save.write(); this.refreshLiftPanel(); };
+    $('#lp-up').onchange = () => this.refreshLiftPanel();
+    $('#lp-up-go').onclick = () => {
+      const l = L(), from = l.T.name, plan = Net.upgradeLift(l, $('#lp-up').value);
+      if (!plan.ok) return UI.toast(plan.msg);
+      UI.toast(`${l.name}: ${from} → ${l.T.name} for ${money(plan.cost)}`);
+      Save.write(); this.openLiftPanel(l);
+    };
+    $('#lp-remove').onclick = () => {
+      const l = L();
+      if (!$('#lp-remove').classList.contains('confirm')) {
+        $('#lp-remove').classList.add('confirm'); $('#lp-remove').textContent = 'Click again to remove'; return;
+      }
+      $('#lp-remove').classList.remove('confirm');
+      this.closeLiftPanel(); Net.remove(l); UI.toast(`Removed ${l.name}`); Save.write();
+    };
   },
 
   strokeMove() {
@@ -443,8 +533,13 @@ const App = {
     for (const l of Net.lifts) {
       const q = l.queue.length;
       l.label.show(q > 0);
-      if (q) { l.label.set(`${l.name} · ${q}`); l.label.el.classList.toggle('long', q > l.T.seats * 25); }
+      if (q) {
+        const w = Lifts.waitTime(l) / 60;
+        l.label.set(`${l.name} · ${q}${w >= 1 ? ` · ${Math.round(w)} min` : ''}`);
+        l.label.el.classList.toggle('long', w > 10);
+      }
     }
+    if (this.panelLift) this.refreshLiftPanel();
   },
 };
 

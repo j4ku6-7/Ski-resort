@@ -4,10 +4,10 @@
 const TIME_SCALE = 30;                 // world seconds per real second at 1x
 const DAY_START = 8.5 * 3600, LAST_ARRIVAL = 14.5 * 3600, DAY_END = 16.5 * 3600;
 const SNAP = 70, RUN_WIDTH = 34, RUN_COST_PER_M = 25, RUN_OP_PER_M = 2;
-const FIXED_OP = 3000;
-const TREE_COST = 150;                 // felling + hauling one tree                 // lodges, staff, ticket office per day
+const FIXED_OP = 3000;                 // lodges, staff, ticket office per day
+const TREE_COST = 150;                 // felling + hauling one tree
 const MAX_DEBT = 100000, DEBT_DAYS = 3, MIN_REP = 15;
-const TICKET = 38, START_MONEY = 650000, MAX_SKIERS = 1500;
+const TICKET = 38, START_MONEY = 900000, MAX_SKIERS = 1500;
 
 const DIFF = [
   { name: 'Blue', color: 0x2f7de1, css: '#2f7de1' },
@@ -19,13 +19,6 @@ const SKILL = [
   { name: 'Intermediates', maxDiff: 1, speed: 10, color: 0xff6a3d, pref: [3, 7, 0] },
   { name: 'Experts', maxDiff: 2, speed: 13, color: 0x9b4dff, pref: [1, 5, 9] },
 ];
-const LIFT_TYPES = {
-  chair: { name: 'Chairlift', baseCost: 20000, perM: 55, speed: 5, interval: 7, seats: 4, towerGap: 110,
-           towerH: 11, gauge: 4, maxLen: 2600, opBase: 2500, opPerM: 1.5, station: 0x8a96a3 },
-  gondola: { name: 'Gondola', baseCost: 60000, perM: 120, speed: 6, interval: 10, seats: 8, towerGap: 230,
-             towerH: 18, gauge: 6, maxLen: 6000, opBase: 5000, opPerM: 3, station: 0xb83a32 },
-};
-
 const fmt = (n) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 const money = (n) => (n < 0 ? '−€' : '€') + fmt(Math.abs(n));
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
@@ -94,8 +87,6 @@ function initAssets() {
   MAT.node = new THREE.MeshLambertMaterial({ color: 0x3a4048 });
   MAT.lodge = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
   MAT.roof = new THREE.MeshLambertMaterial({ color: 0x4a2a1c });
-  MAT.station = {};
-  for (const k in LIFT_TYPES) MAT.station[k] = new THREE.MeshLambertMaterial({ color: LIFT_TYPES[k].station });
 }
 
 function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH, colors = null) {
@@ -129,7 +120,7 @@ function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH, colors = null
 }
 
 function disposeGroup(obj) {
-  const shared = new Set([...Object.values(GEO), MAT.tower, MAT.cable, MAT.node, MAT.lodge, MAT.roof, ...Object.values(MAT.station)]);
+  const shared = new Set([...Object.values(GEO), MAT.tower, MAT.cable, MAT.node, MAT.lodge, MAT.roof]);
   obj.traverse((o) => {
     if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
     if (o.material && !shared.has(o.material)) o.material.dispose();
@@ -147,55 +138,6 @@ function makeNodeVisual(n) {
     g.add(new THREE.Mesh(GEO.disc, MAT.node));
   }
   return g;
-}
-
-function buildLiftVisual(l) {
-  const T = l.T, a = l.a, b = l.b, g = new THREE.Group();
-  const hl = Math.hypot(b.x - a.x, b.z - a.z), ux = (b.x - a.x) / hl, uz = (b.z - a.z) / hl, px = -uz, pz = ux;
-  const ground = (s) => Terrain.height(a.x + ux * s, a.z + uz * s);
-  const prof = [{ s: 0, y: a.y + T.towerH }, { s: hl, y: b.y + T.towerH }];
-  const nT = Math.floor(hl / T.towerGap);
-  for (let k = 1; k <= nT; k++) { const s = (hl * k) / (nT + 1); prof.push({ s, y: ground(s) + T.towerH }); }
-  prof.sort((p, q) => p.s - q.s);
-  // add towers wherever the cable would scrape the snow
-  for (let iter = 0; iter < 40; iter++) {
-    let worst = null, wc = 6;
-    for (let i = 0; i < prof.length - 1; i++) {
-      const p = prof[i], q = prof[i + 1];
-      for (let s = p.s + 10; s < q.s - 10; s += 10) {
-        const c = p.y + ((q.y - p.y) * (s - p.s)) / (q.s - p.s) - ground(s);
-        if (c < wc) { wc = c; worst = s; }
-      }
-    }
-    if (worst === null) break;
-    prof.push({ s: worst, y: ground(worst) + T.towerH });
-    prof.sort((p, q) => p.s - q.s);
-  }
-  const rotY = Math.atan2(ux, uz);
-  l.quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
-  l.dir = { ux, uz, px, pz };
-  for (let i = 1; i < prof.length - 1; i++) {
-    const s = prof[i].s, x = a.x + ux * s, z = a.z + uz * s, gy = ground(s);
-    const t = new THREE.Mesh(GEO.tower, MAT.tower); t.position.set(x, gy - 1, z); t.scale.set(1, prof[i].y - gy + 1, 1);
-    const bar = new THREE.Mesh(GEO.box, MAT.tower); bar.position.set(x, prof[i].y, z);
-    bar.scale.set(T.gauge * 2 + 2, 1.2, 1.2); bar.rotation.y = rotY;
-    g.add(t, bar);
-  }
-  for (const [n, s] of [[a, 0], [b, hl]]) {
-    const st = new THREE.Mesh(GEO.box, MAT.station[l.type]);
-    st.scale.set(T.gauge * 2 + 12, T.towerH + 2, 24);
-    st.position.set(a.x + ux * s, n.y + (T.towerH + 2) / 2 - 1, a.z + uz * s); st.rotation.y = rotY;
-    g.add(st);
-  }
-  const side = (sgn) => prof.map((p) => ({ x: a.x + ux * p.s + px * T.gauge * sgn, y: p.y, z: a.z + uz * p.s + pz * T.gauge * sgn }));
-  const up = side(1), down = side(-1).reverse();
-  for (const line of [up, down]) {
-    const geo = new THREE.BufferGeometry().setFromPoints(line.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
-    g.add(new THREE.Line(geo, MAT.cable));
-  }
-  l.upPath = new Path(up);
-  l.downPath = new Path(down);
-  l.vis = g;
 }
 
 // ---------- network ----------
@@ -231,34 +173,75 @@ const Net = {
   },
 
   liftPlan(type, p, q, free = false) {
+    type = LIFT_ALIASES[type] || type;
     const T = LIFT_TYPES[type];
     let a = p, b = q, ya = this.pointY(p), yb = this.pointY(q);
     if (yb < ya) { [a, b] = [b, a]; [ya, yb] = [yb, ya]; }
     const hl = Math.hypot(b.x - a.x, b.z - a.z), vert = yb - ya, len = Math.hypot(hl, vert);
+    const P = Lifts.profile(T, a, ya, b, yb);
     const trees = Terrain.treesNear([a, b], T.gauge + 8).length;
-    const build = T.baseCost + T.perM * len, cost = build + trees * TREE_COST;
+    const build = T.baseCost + T.perM * len + P.towers * T.towerCost, cost = build + trees * TREE_COST;
+    const grade = T.kind === 'belt' || T.kind === 'surface' ? Lifts.maxGroundGrade(P) : 0;
+    const aName = (/^[aeiou8]/i.test(T.name) ? 'An ' : 'A ') + T.name.toLowerCase();
     let msg = null;
     if (a.node && a.node === b.node) msg = 'Both ends are on the same spot';
-    else if (hl < 80) msg = 'Too short';
-    else if (len > T.maxLen) msg = `Too long — a ${T.name.toLowerCase()} can be at most ${fmt(T.maxLen)} m`;
-    else if (vert < 20) msg = 'A lift needs at least 20 m of climb';
+    else if (hl < T.minLen) msg = `Too short. ${aName} needs at least ${T.minLen} m`;
+    else if (len > T.maxLen) msg = `Too long. ${aName} can be at most ${fmt(T.maxLen)} m`;
+    else if (vert < T.minVert) msg = `${aName} needs at least ${T.minVert} m of climb`;
+    else if (T.maxGrade && grade > T.maxGrade) msg = `Too steep for ${aName.toLowerCase()} (${Math.round(grade * 100)}% here, max ${Math.round(T.maxGrade * 100)}%)`;
     else if (!free && cost > Game.money) msg = 'Not enough money';
-    return { ok: !msg, msg, a, b, hl, len, vert, cost, build, trees, T, type };
+    return { ok: !msg, msg, a, b, hl, len, vert, cost, build, trees, towers: P.towers, T, type };
   },
 
-  buildLift(plan, free = false) {
+  buildLift(plan, free = false, opt = null, name = null) {
     const A = this.pointNode(plan.a), B = this.pointNode(plan.b), T = plan.T;
     const l = { kind: 'lift', id: this.seq.lift++, type: plan.type, T, a: A, b: B, len: plan.len, vert: plan.vert,
-                cost: plan.build, queue: [], carriers: [], clock: 0, next: T.interval };
-    l.name = `L${l.id}`;
-    buildLiftVisual(l);
+                cost: plan.build, queue: [], carriers: [], clock: 0, dist: 0, nextD: 0, next: T.dwell || 0,
+                opt: Object.assign(Lifts.defaultOpt(), opt || {}), ridesToday: 0 };
+    l.name = name || `L${l.id}`;
+    Lifts.build(l);
     this.group.add(l.vis);
-    l.label = Labels.add('', 'queue', { x: A.x, y: A.y + T.towerH + 26, z: A.z });
+    l.label = Labels.add('', 'queue', { x: A.x, y: A.y + Math.max(T.towerH, 6) + 26, z: A.z });
     A.lifts.push(l); B.lifts.push(l); this.lifts.push(l);
     if (!free) Terrain.clearTrees([A, B], T.gauge + 8);
     if (!free) Game.spend(plan.cost);
     this.version++;
     return l;
+  },
+
+  evacuate(l) {
+    for (const s of Game.skiers) if (s.edge === l) { s.state = 'atNode'; s.edge = null; s.node = l.a; }
+    l.queue.length = 0; l.carriers.length = 0;
+  },
+
+  // swap the lift machinery, keeping the stations; half the old lift's value is credited
+  upgradePlan(l, type) {
+    const P = (n) => ({ x: n.x, z: n.z, node: n });
+    const plan = this.liftPlan(type, P(l.a), P(l.b), true);
+    plan.cost = Math.max(0, plan.cost - l.cost * 0.5);
+    if (plan.ok && plan.cost > Game.money) { plan.ok = false; plan.msg = 'Not enough money'; }
+    return plan;
+  },
+  upgradeLift(l, type) {
+    const plan = this.upgradePlan(l, type);
+    if (!plan.ok) return plan;
+    this.evacuate(l);
+    this.group.remove(l.vis); Lifts.dispose(l.vis);
+    l.type = plan.type; l.T = plan.T; l.cost = plan.build; l.len = plan.len;
+    l.clock = l.dist = l.nextD = 0; l.next = l.T.dwell || 0;
+    Lifts.build(l);
+    this.group.add(l.vis);
+    Terrain.clearTrees([l.a, l.b], l.T.gauge + 8);
+    Game.spend(plan.cost);
+    this.version++;
+    return plan;
+  },
+  setLiftOpen(l, open) {
+    if (l.opt.open === open) return;
+    l.opt.open = open;
+    if (!open) for (const s of l.queue) { s.state = 'atNode'; s.edge = null; }
+    if (!open) l.queue.length = 0;
+    this.version++;
   },
 
   runPlan(points, free = false) {
@@ -322,7 +305,7 @@ const Net = {
     const list = e.kind === 'lift' ? this.lifts : this.runs, key = e.kind === 'lift' ? 'lifts' : 'runs';
     list.splice(list.indexOf(e), 1);
     for (const n of [e.a, e.b]) n[key] = n[key].filter((x) => x !== e);
-    this.group.remove(e.vis); disposeGroup(e.vis); e.label.remove();
+    this.group.remove(e.vis); (e.kind === 'lift' ? Lifts.dispose(e.vis) : disposeGroup(e.vis)); e.label.remove();
     Game.money += e.cost * 0.5;
     for (const s of Game.skiers) {
       if (s.edge !== e) continue;
@@ -363,13 +346,10 @@ const Game = {
     for (const p of map.places) if (p.kind === 'base') Net.addNode(p.x, p.z, { base: true, name: p.name });
 
     this.skierMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(2.6, 5, 3, 6), new THREE.MeshLambertMaterial(), MAX_SKIERS);
-    this.carMesh = new THREE.InstancedMesh(GEO.box, new THREE.MeshLambertMaterial(), 8000);
-    for (const im of [this.skierMesh, this.carMesh]) {
-      im.setColorAt(0, new THREE.Color()); im.count = 0; im.frustumCulled = false; scene.add(im);
-    }
+    this.skierMesh.setColorAt(0, new THREE.Color()); this.skierMesh.count = 0; this.skierMesh.frustumCulled = false;
+    scene.add(this.skierMesh);
+    this.carMeshes = Lifts.makeCarrierMeshes(scene);
     this.skillColors = SKILL.map((s) => new THREE.Color(s.color));
-    this.chairColor = new THREE.Color(0x30343a);
-    this.cabinColor = new THREE.Color(0xd0453a);
     this._m = new THREE.Matrix4(); this._v = new THREE.Vector3(); this._s = new THREE.Vector3(); this._q = new THREE.Quaternion();
   },
 
@@ -380,7 +360,7 @@ const Game = {
 
   spend(c) { this.money -= c; this.stats.built += c; },
 
-  get open() { return Net.lifts.length > 0 && Net.runs.length > 0; },
+  get open() { return Net.lifts.some((l) => l.opt.open) && Net.runs.length > 0; },
 
   forestLeft() { const t = Terrain.trees; return t ? t.left / t.total : 1; },
   // guests come for the views: clear more than 10 % of the forest and demand drops
@@ -395,7 +375,7 @@ const Game = {
     return n;
   },
 
-  liftCapacity() { return Net.lifts.reduce((s, l) => s + (l.T.seats / l.T.interval) * 3600, 0); },
+  liftCapacity() { return Net.lifts.reduce((s, l) => s + Lifts.capacity(l), 0); },
 
   demandPerHour() {
     let km = 0; const kinds = new Set();
@@ -425,21 +405,34 @@ const Game = {
   },
 
   stepLift(l, dt) {
-    const T = l.T;
+    const T = l.T, open = l.opt.open, v = Lifts.speed(l), L = l.upPath.length;
+    if (!open && !l.carriers.length) return;          // stopped
     l.clock += dt;
-    while (l.clock >= l.next) {
-      const t0 = l.next; l.next += T.interval;
-      if (l.queue.length) {
-        const riders = l.queue.splice(0, T.seats);
-        for (const s of riders) s.state = 'lift';
-        l.carriers.push({ t0, riders });
-      }
+    const load = () => {
+      if (!open || !l.queue.length) return null;
+      const riders = l.queue.splice(0, T.seats);
+      for (const s of riders) s.state = 'lift';
+      const c = { d: 0, riders }; l.carriers.push(c); l.ridesToday += riders.length;
+      return c;
+    };
+    if (T.kind === 'tram') {
+      // jig-back: the cabin leaves the valley once per round trip
+      while (l.clock >= l.next) { l.next += Lifts.interval(l); load(); }
+    } else {
+      const sp = v * Lifts.interval(l);
+      l.dist += v * dt;
+      while (l.dist >= l.nextD) { const c = load(); if (c) c.d = l.dist - l.nextD; l.nextD += sp; }
     }
-    const L = l.upPath.length;
-    while (l.carriers.length && (l.clock - l.carriers[0].t0) * T.speed >= L) {
+    for (const c of l.carriers) c.d += v * dt;
+    while (l.carriers.length && l.carriers[0].d >= L) {
       for (const s of l.carriers.shift().riders) {
         if (s.state !== 'lift') continue;
-        s.state = 'atNode'; s.node = l.b; s.edge = null; s.happy = Math.min(100, s.happy + 1);
+        s.state = 'atNode'; s.node = l.b; s.edge = null;
+        // ride comfort: long open rides are cold, cabins are cosy, T-bars are hard for beginners
+        const mins = L / v / 60;
+        let h = 1 + (T.comfort || 0) * 0.5 - T.cold * Math.max(0, mins - 5) * 1.2;
+        if (T.beginnerPenalty && s.skill === 0) h -= T.beginnerPenalty;
+        s.happy = clamp(s.happy + h, 0, 100);
       }
     }
   },
@@ -462,7 +455,7 @@ const Game = {
     while (q.length) {
       const n = q.shift();
       for (const r of n.runs) if (r.a === n && r.diff <= max) return true;
-      for (const l of n.lifts) if (l.a === n && !seen.has(l.b)) { seen.add(l.b); q.push(l.b); }
+      for (const l of n.lifts) if (l.a === n && l.opt.open && !seen.has(l.b)) { seen.add(l.b); q.push(l.b); }
     }
     return false;
   },
@@ -475,7 +468,7 @@ const Game = {
 
   canStart(n, skill) {
     return n.runs.some((r) => r.a === n && r.diff <= SKILL[skill].maxDiff) ||
-           n.lifts.some((l) => l.a === n && this.liftUseful(l, skill));
+           n.lifts.some((l) => l.a === n && l.opt.open && this.liftUseful(l, skill));
   },
 
   decide(s) {
@@ -490,7 +483,12 @@ const Game = {
       opts.push([r, w]);
     }
     for (const l of n.lifts) {
-      if (l.a === n && this.liftUseful(l, s.skill)) opts.push([l, 3 / (1 + l.queue.length / (l.T.seats * 6))]);
+      if (l.a !== n || !l.opt.open || !this.liftUseful(l, s.skill)) continue;
+      // pick by expected wait + ride time; beginners avoid T-bars, everyone likes a warm cabin
+      let w = 3 / (1 + (Lifts.waitTime(l) + Lifts.rideTime(l) * 0.3) / 300);
+      if (l.T.beginnerPenalty && s.skill === 0) w *= 0.3;
+      w *= 1 + (l.T.comfort || 0) * 0.05;
+      opts.push([l, w]);
     }
     if (!opts.length) {
       if (n.base) {
@@ -554,7 +552,7 @@ const Game = {
   endDay() {
     for (const s of this.skiers) if (s.state !== 'gone') this.leave(s);
     this.skiers = [];
-    for (const l of Net.lifts) { l.queue.length = 0; l.carriers.length = 0; }
+    for (const l of Net.lifts) { l.queue.length = 0; l.carriers.length = 0; l.ridesYesterday = l.ridesToday; l.ridesToday = 0; }
     const ops = this.dailyCost();
     this.money -= ops;
     this.stats.ops = ops;
@@ -569,7 +567,7 @@ const Game = {
 
   dailyCost() {
     let ops = Net.lifts.length || Net.runs.length ? FIXED_OP : 0;
-    for (const l of Net.lifts) ops += l.T.opBase + l.T.opPerM * l.len;
+    for (const l of Net.lifts) ops += Lifts.dailyCost(l);
     for (const r of Net.runs) ops += r.len * RUN_OP_PER_M;
     return ops;
   },
@@ -580,7 +578,7 @@ const Game = {
       rep: this.rep, debtDays: this.debtDays, stats: this.stats,
       nodes: Net.nodes.filter((n) => !n.base).map((n) => ({ id: n.id, x: n.x, z: n.z })),
       bases: Net.nodes.filter((n) => n.base).map((n) => ({ id: n.id, name: n.name })),
-      lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id })),
+      lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id, opt: l.opt, name: l.name })),
       runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points })),
       trees: Terrain.treeMask(),
     };
@@ -593,7 +591,7 @@ const Game = {
     const P = (n) => ({ x: n.x, z: n.z, node: n });
     for (const l of d.lifts) {
       const plan = Net.liftPlan(l.type, P(byId.get(l.a)), P(byId.get(l.b)), true);
-      if (plan.ok) Net.buildLift(plan, true);
+      Net.buildLift(plan, true, l.opt, l.name);
     }
     for (const r of d.runs) {
       const pts = r.points.map((p) => ({ ...p }));
@@ -620,12 +618,12 @@ const Game = {
 
   // ---------- rendering of moving things ----------
   render() {
-    const M = this._m, V = this._v, S = this._s, Q = this._q, sm = this.skierMesh, cm = this.carMesh;
+    const M = this._m, V = this._v, S = this._s, sm = this.skierMesh;
     const ident = new THREE.Quaternion();
-    let si = 0, ci = 0;
+    let si = 0;
     const putSkier = (x, y, z, sc, skill) => {
       if (si >= MAX_SKIERS) return;
-      M.compose(V.set(x, y, z), ident, S.set(sc, sc, sc)); sm.setMatrixAt(si, M); sm.setColorAt(si, this.skillColors[skill]); si++;
+      M.compose(V.set(x, y, z), ident, S.set(sc, sc, sc)); sm.setMatrixAt(si, M); S.set(1, 1, 1); sm.setColorAt(si, this.skillColors[skill]); si++;
     };
     for (const s of this.skiers) {
       if (s.state === 'ski') {
@@ -638,25 +636,38 @@ const Game = {
         putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
       }
     }
+    const cm = this.carMeshes, cnt = {};
+    for (const k in cm) cnt[k] = 0;
+    const putCar = (model, x, y, z, q) => {
+      const im = cm[model];
+      if (cnt[model] >= im.instanceMatrix.count) return;
+      M.compose(V.set(x, y, z), q, S.set(1, 1, 1)); im.setMatrixAt(cnt[model]++, M);
+      if (model === 'chair6') cm.bubble.setMatrixAt(cnt.bubble++, M);
+    };
     for (const l of Net.lifts) {
-      const T = l.T, sp = T.speed * T.interval, L = l.upPath.length, { ux, uz, px, pz } = l.dir;
-      const gondola = l.type === 'gondola';
-      S.set(gondola ? 6 : 9, gondola ? 6 : 1.6, gondola ? 6 : 3.5);
-      for (let d = (l.clock * T.speed) % sp; d < L && ci < 7998; d += sp) {
-        for (const path of [l.upPath, l.downPath]) {
-          const p = path.at(d, TMP);
-          M.compose(V.set(p.x, p.y - (gondola ? 7 : 6), p.z), l.quat, S);
-          cm.setMatrixAt(ci, M); cm.setColorAt(ci, gondola ? this.cabinColor : this.chairColor); ci++;
+      const T = l.T, L = l.upPath.length, { ux, uz, px, pz } = l.dir, v = Lifts.speed(l);
+      if (T.kind === 'tram') {
+        // cabin A on the uphill track, cabin B mirrored on the other one
+        const tUp = L / v, period = Lifts.interval(l), ph = (l.clock - (l.next - period) + period) % period;
+        const d = ph < tUp ? ph * v : ph < tUp + T.dwell ? L : ph < 2 * tUp + T.dwell ? L - (ph - tUp - T.dwell) * v : 0;
+        let p = l.upPath.at(d, TMP); putCar('tram', p.x, p.y, p.z, l.quat);
+        p = l.downPath.at(d, TMP); putCar('tram', p.x, p.y, p.z, l.quatDown);
+      } else if (T.model) {
+        const sp = v * Lifts.interval(l), up = T.kind === 'surface' ? l.ropeUp : l.upPath, Lr = up.length;
+        for (let d = (l.dist % sp); d < Lr; d += sp) {
+          let p = up.at(d, TMP); putCar(T.model, p.x, p.y, p.z, l.quat);
+          p = l.downPath.at(d, TMP); putCar(T.model, p.x, p.y, p.z, l.quatDown);
         }
       }
-      if (!gondola) {
-        for (const c of l.carriers) {
-          const p = l.upPath.at((l.clock - c.t0) * T.speed, TMP), n = c.riders.length;
-          c.riders.forEach((s, k) => {
-            const o = (k - (n - 1) / 2) * 2.2;
-            putSkier(p.x + px * o, p.y - 3, p.z + pz * o, 0.45, s.skill);
-          });
-        }
+      const visible = T.model !== 'gondola' && T.kind !== 'tram';
+      if (visible) for (const c of l.carriers) {
+        const p = l.upPath.at(c.d, TMP), n = c.riders.length;
+        c.riders.forEach((s, k) => {
+          if (T.kind === 'aerial') {
+            const o = (k - (n - 1) / 2) * 0.62 * CS;
+            putSkier(p.x + px * o, p.y - 2.6 * CS, p.z + pz * o, 0.42, s.skill);
+          } else putSkier(p.x + px * (k ? 1.5 : -1.5), p.y + 5.5, p.z + pz * (k ? 1.5 : -1.5), 0.8, s.skill);
+        });
       }
       l.queue.forEach((s, k) => {
         const row = Math.floor(k / 6), col = (k % 6) - 2.5;
@@ -664,10 +675,10 @@ const Game = {
         putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
       });
     }
-    sm.count = si; cm.count = ci;
-    sm.instanceMatrix.needsUpdate = cm.instanceMatrix.needsUpdate = true;
+    for (const k in cm) { cm[k].count = cnt[k]; cm[k].instanceMatrix.needsUpdate = true; }
+    sm.count = si;
+    sm.instanceMatrix.needsUpdate = true;
     if (sm.instanceColor) sm.instanceColor.needsUpdate = true;
-    if (cm.instanceColor) cm.instanceColor.needsUpdate = true;
   },
 };
 
