@@ -247,7 +247,7 @@ const App = {
         this.brush = clamp(this.brush + (e.key === ']' ? 10 : -10), 20, 120);
         this.brushRing.scale.setScalar(this.brush); this.updateHover();
       }
-      else if (e.key === 'Escape') this.setTool(this.tool === 'select' ? 'select' : this.tool);
+      else if (e.key === 'Escape') { if (this.tool === 'station') { this.stationLift = null; this.setTool('select'); } else this.setTool(this.tool === 'select' ? 'select' : this.tool); }
       else if (e.key === 'Enter') this.finishRun();
       else if (e.key === 'Backspace' && this.draft && this.draft.pts) { this.draft.pts.pop(); this.updateHover(); e.preventDefault(); }
       else if (e.key === 'h' || e.key === 'H') this.toggleContours();
@@ -324,6 +324,19 @@ const App = {
       if (this.tool === 'select' || this.tool === 'bulldoze') this.showTooltip(Net.edgeNear(hit.x, hit.z));
     }
     if (this.tool === 'pylons' && this.edit) this.hoverPylons(hit);
+    if (this.tool === 'station' && this.stationLift) {
+      const l = this.stationLift, hl = Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z);
+      this.stationS = null;
+      if (hit) {
+        const rx = hit.x - l.a.x, rz = hit.z - l.a.z, s = rx * l.dir.ux + rz * l.dir.uz;
+        if (Math.abs(rx * l.dir.px + rz * l.dir.pz) < 70 && s > 0 && s < hl) {
+          this.stationS = s;
+          const x = l.a.x + l.dir.ux * s, z = l.a.z + l.dir.uz * s, ok = Net.midStationPlan(l, s).ok;
+          this.snapRing.visible = true; this.snapRing.position.set(x, Terrain.height(x, z) + 3, z);
+          this.snapRing.material.color.set(ok ? 0x3dff9a : 0xff4d4d);
+        }
+      }
+    } else if (this.snapRing) this.snapRing.material.color.set(0x3dff9a);
     this.brushRing.visible = !!hit && this.tool === 'cut';
     if (this.brushRing.visible) this.brushRing.position.set(hit.x, hit.y + 4, hit.z);
     this.updatePreview();
@@ -363,6 +376,11 @@ const App = {
     $('#grade-it').hidden = true;
     if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom toward the cursor · WASD/arrows move · Q/E turn · double-click to fly there · click a lift for its options.';
     else if (t === 'bulldoze') hint = 'Click a lift or run to remove it (50% refund).';
+    else if (t === 'station' && this.stationLift) {
+      const l = this.stationLift, sp = this.stationS != null ? Net.midStationPlan(l, this.stationS) : null;
+      hint = !sp ? `Point at ${l.name}'s line to place an intermediate station` :
+        sp.ok ? `Click to build a station here, ${Math.round(sp.s)} m up the line · <b>${money(sp.cost)}</b> · Esc to cancel` : `<span class="neg">${sp.msg}</span>`;
+    }
     else if (t === 'pylons' && this.edit) {
       const e = this.edit;
       hint = e.hover != null ? 'Drag to move this pylon along the line · click to select it'
@@ -387,7 +405,8 @@ const App = {
         this.liftLine.material.color.set(plan.ok ? 0x3dff9a : 0xff4d4d);
         this.liftLine.visible = true;
         const cap = (T.seats / (T.kind === 'tram' ? 2 * (plan.len / T.speed + T.dwell) : T.interval)) * 3600;
-        hint = `${fmt(plan.len)} m · climbs ${fmt(plan.vert)} m · ${plan.towers} towers · ${fmt(cap)} skiers/h · ride ${(plan.len / T.speed / 60).toFixed(1)} min · <b>${money(plan.cost)}</b>` +
+        hint = (plan.joinWith ? `<b class="join">Continues ${plan.joinWith.name} through an ${plan.bendDeg > 3 ? `angle station (turns ${Math.round(plan.bendDeg)}°)` : 'intermediate station'}</b> · ` : '') +
+          `${fmt(plan.len)} m · climbs ${fmt(plan.vert)} m · ${plan.towers} towers · ${fmt(cap)} skiers/h · ride ${(plan.len / T.speed / 60).toFixed(1)} min · <b>${money(plan.cost)}</b>` +
           (plan.trees ? ` <span class="dim">(incl. ${plan.trees} trees to fell)</span>` : '') +
           (plan.ok ? ' — click to build' : ` — <span class="neg">${plan.msg}</span>`) + ' · Esc to cancel';
       }
@@ -428,6 +447,13 @@ const App = {
     if (t === 'bulldoze') {
       const e = h && Net.edgeNear(h.x, h.z);
       if (e) { if (e === this.panelLift) this.closeLiftPanel(); Net.remove(e); UI.toast(e.planned ? `Deleted the plan for ${e.name}` : `Removed ${e.name}`); Save.write(); this.refreshPlans(); }
+    } else if (t === 'station' && this.stationLift) {
+      if (this.stationS == null) return;
+      const l = this.stationLift, r = Net.addMidStation(l, this.stationS);
+      if (!r.ok) return UI.toast(r.msg);
+      UI.toast(`Built a station on ${l.name}${r.cost ? ` for ${money(r.cost)}` : ''}. Skiers can get on and off there, or stay on.`);
+      this.stationLift = null; Save.write(); this.setTool('select'); this.openLiftPanel(l);
+      return;
     } else if (t === 'pylons' && this.edit) {
       const e = this.edit;
       if (e.hover != null) e.sel = e.hover;
@@ -1043,7 +1069,14 @@ const App = {
     const l = this.panelLift;
     if (!l || !Net.lifts.includes(l)) return this.closeLiftPanel();
     const T = l.T;
-    $('#lp-type').textContent = `${T.icon} ${T.name}${l.planned ? ' · 📐 planned' : ''}`;
+    const line = Net.lineOf(l), sec = line.indexOf(l) + 1;
+    $('#lp-type').textContent = `${T.icon} ${T.name}${l.planned ? ' · 📐 planned' : ''}${line.length > 1 ? ` · section ${sec} of ${line.length}` : ''}`;
+    $('#lp-station').hidden = !Lifts.canHaveStations(T);
+    $('#lp-unstation').hidden = !Lifts.partnerAbove(l);
+    if (Lifts.partnerAbove(l)) {
+      const up = Lifts.partnerAbove(l), bend = Lifts.bendAngle(l, up);
+      $('#lp-unstation').textContent = `Remove the ${bend > 3 ? `angle station (${Math.round(bend)}°)` : 'station'} at the top of this section`;
+    }
     $('#lp-speed-v').textContent = `${(Lifts.speed(l)).toFixed(1)} m/s`;
     $('#lp-density-v').textContent = `${Math.round(l.opt.density * 100)}%`;
     $('#lp-stats').innerHTML = `
@@ -1096,6 +1129,12 @@ const App = {
       Save.write(); this.openLiftPanel(l);
     };
     $('#lp-build').onclick = () => this.buildPlan(L());
+    $('#lp-station').onclick = () => { const l = L(); this.closeLiftPanel(); this.stationLift = l; this.setTool('station'); };
+    $('#lp-unstation').onclick = () => {
+      const l = L(), r = Net.removeStation(l.b);
+      if (!r.ok) return UI.toast(r.msg);
+      UI.toast('Station removed: the two sections are one lift again'); Save.write(); this.openLiftPanel(l);
+    };
     $('#lp-remove').onclick = () => {
       const l = L();
       if (!$('#lp-remove').classList.contains('confirm')) {

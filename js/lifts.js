@@ -600,6 +600,18 @@ const Lifts = {
       this._cyl(parts, 'galv', F, rb + 0.5, rb + 0.5, 0.5, 0, 0.9, 0, 20);                     // flange plate
       this._cyl(parts, 'galv', FS, rt, rb, H - 0.6, 0, 1.4, 0, 20);                             // conical tube
       this._box(parts, 'galv', FS, reach * 2 + 1.5, 1.5, 1.4, 0, H + 0.2, 0);                  // box crossarm
+      // trapezoidal head: a plate widening from the tube to the crossarm, with a lightening hole
+      const ht = Math.min(5, Math.max(2.6, reach * 0.42)), wTop = reach * 0.85, wBot = rt * 1.05, yb = H - 0.55 - ht;
+      const sh = new THREE.Shape();
+      sh.moveTo(-wBot, 0); sh.lineTo(wBot, 0); sh.lineTo(wTop, ht); sh.lineTo(-wTop, ht); sh.closePath();
+      const hole = new THREE.Path(), hi = ht * 0.22;
+      hole.moveTo(-wBot * 0.55, hi); hole.lineTo(wBot * 0.55, hi); hole.lineTo(wTop * 0.62, ht - hi); hole.lineTo(-wTop * 0.62, ht - hi); hole.closePath();
+      if (wTop > 2.2) sh.holes.push(hole);
+      for (const zz of [-0.62, 0.42]) {                                                         // two side plates
+        const pg = new THREE.ExtrudeGeometry(sh, { depth: 0.2, bevelEnabled: false });
+        pg.translate(0, yb, zz); parts.add('galv', pg, FS);
+      }
+      this._box(parts, 'galv', FS, wBot * 2, 0.5, 1.4, 0, yb, 0);                               // collar on the tube
       this._cyl(parts, 'galv', FS, 1.1, 1.1, 2.2, 0, H - 0.9, 0, 16);
       // catwalks along the whole battery (drawn once per train), with railings
       if (i === t.i) {
@@ -710,26 +722,63 @@ const Lifts = {
     // detachable / gondola terminal: concrete plinth, columns, glass walls, gabled roof, bullwheel inside
     const big = T.model === 'cabin3s' || T.model === 'funitel';
     const W = (g + ext) * 2 + 12, L = big ? 62 : T.enclosed ? 50 : 42, zc = o * (L / 2 - 8);
+    this._hall(parts, F, T, W, L, zc, o);
+    this._bullwheel(parts, F, g, 0, H, o * (L - 12));
+    for (const sx of [-1, 1]) this._box(parts, 'dark', F, 0.5, 0.5, L - 14, sx * g, H + 0.6, zc - o * 2);   // station rail
+    this._box(parts, 'wood', F, W - 4, 0.5, L * 0.45, 0, 1.45, zc - o * L * 0.18);                         // boarding platform
+    if (drive) {
+      this._box(parts, 'wall', F, W * 0.7, 8, 12, 0, 4, zc + o * (L / 2 + 6));                                 // machine house
+      this._box(parts, 'accent', F, W * 0.7 + 0.6, 1, 12.6, 0, 8.2, zc + o * (L / 2 + 6));
+      this._box(parts, 'roof', F, W * 0.7 + 1, 0.6, 13, 0, 8.9, zc + o * (L / 2 + 6));
+      this._box(parts, 'dark', F, 2.4, 2.4, 0.3, W * 0.2, 3.5, zc + o * (L / 2 + 12.2));                       // window
+    }
+  },
+
+  // station hall: plinth, columns, glass side walls (+ an end wall at `endWall` = ±1), fascia, gabled roof
+  _hall(parts, F, T, W, L, zc, endWall = 0) {
+    const H = T.towerH, big = T.model === 'cabin3s' || T.model === 'funitel';
     const floor = 1.2, eave = H + 5, pitch = big ? 0.22 : 0.3, half = W / 2 + 1.5;
     this._box(parts, 'concrete', F, W + 2, floor + 1, L + 2, 0, floor / 2 - 0.5, zc);
-    for (const sx of [-1, 1]) for (const zz of [-L / 2, 0, L / 2]) {
-      this._box(parts, 'steel', F, 1, eave - floor, 1, sx * W / 2, floor + (eave - floor) / 2, zc + zz);
-    }
+    for (const sx of [-1, 1]) for (const zz of [-L / 2, 0, L / 2]) this._box(parts, 'steel', F, 1, eave - floor, 1, sx * W / 2, floor + (eave - floor) / 2, zc + zz);
     for (const sx of [-1, 1]) this._box(parts, 'glass', F, 0.3, eave - floor - 2.5, L - 1, sx * W / 2, floor + (eave - floor - 2.5) / 2 + 0.3, zc);
-    this._box(parts, 'glass', F, W - 1, eave - floor - 2.5, 0.3, 0, floor + (eave - floor - 2.5) / 2 + 0.3, zc + o * L / 2);   // outer end wall
-    for (const sx of [-1, 1]) this._box(parts, accent, F, 0.6, 1.6, L + 2, sx * (W / 2 + 0.2), eave - 0.6, zc);               // fascia
+    if (endWall) this._box(parts, 'glass', F, W - 1, eave - floor - 2.5, 0.3, 0, floor + (eave - floor - 2.5) / 2 + 0.3, zc + endWall * L / 2);
+    for (const sx of [-1, 1]) this._box(parts, 'accent', F, 0.6, 1.6, L + 2, sx * (W / 2 + 0.2), eave - 0.6, zc);
     for (const sx of [-1, 1]) this._box(parts, 'roof', F, half + 0.5, 0.7, L + 3, sx * half / 2 * Math.cos(pitch), eave + 0.3 + half / 2 * Math.sin(pitch), zc, 0, -sx * pitch);
-    this._box(parts, accent, F, 1.2, 1, L + 3.4, 0, eave + 0.6 + half * Math.sin(pitch), zc);                                   // ridge
-    this._bullwheel(parts, F, g, 0, H, o * (L - 12));
-    // station rail the carriers ride on while detached, and the boarding platform
-    for (const sx of [-1, 1]) this._box(parts, 'dark', F, 0.5, 0.5, L - 14, sx * g, H + 0.6, zc - o * 2);
-    this._box(parts, 'wood', F, W - 4, 0.5, L * 0.45, 0, floor + 0.25, zc - o * L * 0.18);
-    if (drive) {
-      this._box(parts, 'wall', F, W * 0.7, 8, 12, 0, 4, zc + o * (L / 2 + 6));                                                 // machine house
-      this._box(parts, accent, F, W * 0.7 + 0.6, 1, 12.6, 0, 8.2, zc + o * (L / 2 + 6));
-      this._box(parts, 'roof', F, W * 0.7 + 1, 0.6, 13, 0, 8.9, zc + o * (L / 2 + 6));
-      this._box(parts, 'dark', F, 2.4, 2.4, 0.3, W * 0.2, 3.5, zc + o * (L / 2 + 12.2));                                       // window
+    this._box(parts, 'accent', F, 1.2, 1, L + 3.4, 0, eave + 0.6 + half * Math.sin(pitch), zc);
+  },
+
+  canHaveStations(T) { return T.kind === 'aerial' && T.station3d !== 'fixed'; },
+
+  // the sections of one lift line meeting at a node: lower (ends here) and upper (starts here)
+  partnerBelow(l) { return l.line ? Net.lifts.find((x) => x !== l && x.line === l.line && x.b === l.a) : null; },
+  partnerAbove(l) { return l.line ? Net.lifts.find((x) => x !== l && x.line === l.line && x.a === l.b) : null; },
+  bendAngle(low, up) {
+    const d = clamp(low.dir.ux * up.dir.ux + low.dir.uz * up.dir.uz, -1, 1);
+    return Math.acos(d) * 180 / Math.PI;
+  },
+
+  // Mid-station (straight) or angle station (the line turns): one hall along the bisector of the two
+  // sections, the lower section's bullwheel just past the node, the upper section's just before it.
+  junction(parts, up, low, node) {
+    const T = up.T, H = T.towerH, g = T.gauge, ext = Math.max(0, ...(T.ropes || [0]).map(Math.abs));
+    const u1 = low.dir, u2 = up.dir;
+    let bx = u1.ux + u2.ux, bz = u1.uz + u2.uz; const bl = Math.hypot(bx, bz) || 1; bx /= bl; bz /= bl;
+    const bend = this.bendAngle(low, up) * Math.PI / 180;
+    const at = (rot) => new THREE.Matrix4().makeRotationY(rot).premultiply(new THREE.Matrix4().makeTranslation(node.x, node.y, node.z));
+    const FB = at(Math.atan2(bx, bz));
+    const W = (g + ext) * 2 + 14 + 26 * Math.sin(bend / 2), L = 56 + 20 * Math.sin(bend / 2);
+    this._hall(parts, FB, T, W, L, 0, 0);
+    this._box(parts, 'wood', FB, W - 4, 0.5, L * 0.5, 0, 1.45, 0);                                   // platform for getting on/off
+    this._box(parts, 'wall', FB, 10, 7, 8, W / 2 + 6, 3.5, 0);                                      // control room
+    this._box(parts, 'accent', FB, 10.6, 0.8, 8.6, W / 2 + 6, 7.2, 0);
+    const F1 = at(Math.atan2(u1.ux, u1.uz)), F2 = at(Math.atan2(u2.ux, u2.uz));
+    this._bullwheel(parts, F1, g, 0, H, 10);                                                       // lower loop returns here
+    this._bullwheel(parts, F2, g, 0, H, -10);                                                      // upper loop is driven from here
+    for (const sx of [-1, 1]) {
+      this._box(parts, 'dark', F1, 0.5, 0.5, 14, sx * g, H + 0.6, 2);                              // detach rails into the hall
+      this._box(parts, 'dark', F2, 0.5, 0.5, 14, sx * g, H + 0.6, -2);
     }
+    this._box(parts, 'dark', FB, 3, 2.2, 4, 0, H + 1.8, -L / 2 + 6);                              // drive motor for the upper loop
   },
 
   build(l) {
@@ -764,11 +813,12 @@ const Lifts = {
     }
 
     const parts = new Parts();
+    const below = this.partnerBelow(l), above = this.partnerAbove(l);
     const FL = new THREE.Matrix4().makeRotationY(rotY).premultiply(new THREE.Matrix4().makeTranslation(a.x, 0, a.z));
     for (const t of P.trains) this._battery(parts, FL, l, t);
     for (let i = 1; i < prof.length - 1; i++) this.pylon(parts, l, P, i, rotY, FL);
-    this.station(parts, l, a, 0, true, rotY, P);
-    this.station(parts, l, b, hl, false, rotY, P);
+    if (below) this.junction(parts, l, below, a); else this.station(parts, l, a, 0, true, rotY, P);
+    if (!above) this.station(parts, l, b, hl, false, rotY, P);
     parts.build(g, mat);
 
     // ropes: one per side, or two/three for funitels, 3S and trams
