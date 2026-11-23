@@ -782,7 +782,7 @@ const App = {
       $('#pp-h-note').textContent = middle ? 'This pylon sits inside a linked sheave train; its head follows the rope curve.' : '';
       const isY = sel.type === 'y' || sel.type === 'twin', twin = sel.type === 'twin';
       $('#pp-spread-row').hidden = !isY;
-      $('#pp-lean-row').hidden = isY; $('#pp-align').hidden = isY;
+      $('#pp-lean-row').hidden = twin; $('#pp-align').hidden = twin;      // a Y leans as a whole, twin legs stay upright
       $('#pp-spread').min = twin ? 12 : 8; $('#pp-spread').max = twin ? 40 : 30;
       $('#pp-spread').value = sel.spread || (twin ? 22 : 16);
       $('#pp-spread-v').textContent = `${Math.round(sel.spread || (twin ? 22 : 16))} m between the ${twin ? 'legs' : 'heads'}`;
@@ -882,8 +882,9 @@ const App = {
       }
       else if (style === 'y' && inf && inf.heads.length > 1) {
         const fy = g + Math.max(3, Math.min((topY - g) * 0.3, 14));
-        ctx.moveTo(X, sy(g)); ctx.lineTo(X, sy(fy));
-        for (const h of inf.heads) { ctx.moveTo(X, sy(fy)); ctx.lineTo(sx(h.s), sy(h.y)); }
+        const shift = (inf.heads[0].s + inf.heads[1].s) / 2 - t.s, FX = sx(t.s + (shift * (fy - g)) / Math.max(1, t.h));
+        ctx.moveTo(X, sy(g)); ctx.lineTo(FX, sy(fy));
+        for (const h of inf.heads) { ctx.moveTo(FX, sy(fy)); ctx.lineTo(sx(h.s), sy(h.y)); }
       }
       else { ctx.moveTo(X, sy(g)); ctx.lineTo(XH, sy(topY)); }
       ctx.stroke();

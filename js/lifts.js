@@ -204,9 +204,11 @@ const Lifts = {
         if (!(t.s > 0 && t.s < hl)) continue;
         if (t.type === 'y' || t.type === 'twin') {
           const twin = t.type === 'twin', sp2 = (twin ? clamp(t.spread || 22, 12, 40) : clamp(t.spread || 16, 8, 30)) / 2, y = ground(t.s) + t.h;
-          const sa = clamp(t.s - sp2, 1, hl - 1), sb = clamp(t.s + sp2, 1, hl - 1);
-          prof.push({ s: sa, foot: twin ? sa : t.s, y, type: t.type, ypair: 'a', link: true, wheels: t.wheels, mode: t.mode, src: t });
-          prof.push({ s: sb, foot: twin ? sb : t.s, y, type: t.type, ypair: 'b', link: !!t.link, src: t });
+          // a Y can lean: both heads shift along the line by h * tan(lean), keeping their spread
+          const lean = twin ? 0 : clamp(t.lean || 0, -MAX_LEAN * 1.5, MAX_LEAN * 1.5), shift = t.h * Math.tan(lean * Math.PI / 180);
+          const sa = clamp(t.s + shift - sp2, 1, hl - 1), sb = clamp(t.s + shift + sp2, 1, hl - 1);
+          prof.push({ s: sa, foot: twin ? sa : t.s, y, type: t.type, ypair: 'a', link: true, wheels: t.wheels, mode: t.mode, src: t, lean, yShift: shift, yH: t.h });
+          prof.push({ s: sb, foot: twin ? sb : t.s, y, type: t.type, ypair: 'b', link: !!t.link, src: t, yShift: shift, yH: t.h });
           continue;
         }
         const lean = clamp(t.lean || 0, -MAX_LEAN * 1.5, MAX_LEAN * 1.5), head = clamp(t.s + t.h * Math.tan(lean * Math.PI / 180), 1, hl - 1);
@@ -723,16 +725,18 @@ const Lifts = {
     } else if (p.ypair) {
       // Y-pylon: one foundation and trunk, two standard pylon branches splayed along the line, each with a head
       const hf = Math.max(3, Math.min(H * 0.3, 14)), rb = 1.5 + H * 0.018;
+      const shearZ = (kk) => new THREE.Matrix4().set(1, 0, 0, 0, 0, 1, 0, 0, 0, kk, 1, 0, 0, 0, 0, 1);
+      // a leaning Y: the trunk tilts with the lean, so the fork sits off the foot along the line
+      const fz = p.yShift && p.yH ? (p.yShift * hf) / p.yH : 0, FT = F.clone().multiply(shearZ(hf > 0 ? fz / hf : 0));
       if (p.ypair === 'a') {
         this._box(parts, 'concrete', F, 7, 1.8, 7, 0, 0.1, 0);
         this._cyl(parts, 'galv', F, rb + 0.6, rb + 0.6, 0.5, 0, 0.9, 0, 20);
-        this._cyl(parts, 'galv', F, rb * 0.92, rb, hf - 1.4, 0, 1.4, 0, 20);                    // trunk
-        this._box(parts, 'galv', F, rb * 2.2, 1.4, rb * 2.4, 0, hf, 0);                          // fork node
-        ladder(F, rb, 1.5, hf - 0.6);
+        this._cyl(parts, 'galv', FT, rb * 0.92, rb, hf - 1.4, 0, 1.4, 0, 20);                   // trunk
+        this._box(parts, 'galv', FT, rb * 2.2, 1.4, rb * 2.4, 0, hf, 0);                         // fork node
+        ladder(FT, rb, 1.5, hf - 0.6);
       }
-      const k = H - hf > 0 ? dz / (H - hf) : 0;
-      const FB = F.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -k * hf))
-        .multiply(new THREE.Matrix4().set(1, 0, 0, 0, 0, 1, 0, 0, 0, k, 1, 0, 0, 0, 0, 1));
+      const k = H - hf > 0 ? (dz - fz) / (H - hf) : 0;
+      const FB = F.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, fz - k * hf)).multiply(shearZ(k));
       this._cyl(parts, 'galv', FB, 0.85, 1.1, H - hf - 0.4, 0, hf, 0, 18);                       // branch tube
       head(FB, H);
     } else if (style === 'mgd') {
