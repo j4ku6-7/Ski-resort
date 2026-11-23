@@ -6,6 +6,8 @@ const DAY_START = 8.5 * 3600, LAST_ARRIVAL = 14.5 * 3600, DAY_END = 16.5 * 3600;
 const SNAP = 70, RUN_WIDTH = 34, RUN_COST_PER_M = 25, RUN_OP_PER_M = 2;
 const FIXED_OP = 3000;                 // lodges, staff, ticket office per day
 const TREE_COST = 150;                 // felling + hauling one tree
+const EARTH_COST = 0.5;                // € per m³ of cut-and-fill
+const GRADE_HALF = RUN_WIDTH / 2 + 5, GRADE_MARGIN = 22;   // levelled half-width, blend back to the slope
 const MAX_DEBT = 100000, DEBT_DAYS = 3, MIN_REP = 15;
 const TICKET = 38, START_MONEY = 900000, MAX_SKIERS = 1500;
 
@@ -71,6 +73,63 @@ function smoothLine(points, step = 8) {
   return out;
 }
 
+// Grade a run so no pitch is steeper than maxG, keeping both ends (the stations) at their real height.
+// Each point is pulled toward the natural ground but kept inside the band that still lets the run
+// reach the bottom without exceeding maxG and without going uphill.
+function gradeProfile(dense, maxG) {
+  const n = dense.length, s = [0];
+  for (let i = 1; i < n; i++) s.push(s[i - 1] + Math.hypot(dense[i].x - dense[i - 1].x, dense[i].z - dense[i - 1].z));
+  const L = s[n - 1], y0 = dense[0].y, yn = dense[n - 1].y;
+  const avg = (y0 - yn) / (L || 1);
+  if (avg > maxG) return { pts: null, avg };
+  const out = [{ x: dense[0].x, z: dense[0].z, y: y0 }];
+  for (let i = 1; i < n; i++) {
+    const prev = out[i - 1].y, ds = s[i] - s[i - 1];
+    const lo = Math.max(yn, y0 - maxG * s[i], prev - maxG * ds);
+    const hi = Math.min(y0, yn + maxG * (L - s[i]), prev);
+    out.push({ x: dense[i].x, z: dense[i].z, y: clamp(dense[i].y, lo, hi) });
+  }
+  out[n - 1].y = yn;
+  // earth volume: the piste is levelled across its width and blended back to the slope at the edges
+  let volume = 0;
+  for (let i = 0; i < n; i++) {
+    const a = out[Math.max(0, i - 1)], b = out[Math.min(n - 1, i + 1)];
+    let dx = b.x - a.x, dz = b.z - a.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    const ds = (s[Math.min(n - 1, i + 1)] - s[Math.max(0, i - 1)]) / 2;
+    for (let o = -(GRADE_HALF + GRADE_MARGIN); o <= GRADE_HALF + GRADE_MARGIN; o += 8) {
+      const x = out[i].x - dz * o, z = out[i].z + dx * o, d = Math.abs(o);
+      const w = d <= GRADE_HALF ? 1 : 1 - smoothstep(GRADE_HALF, GRADE_HALF + GRADE_MARGIN, d);
+      volume += Math.abs(out[i].y - Terrain.height(x, z)) * w * 8 * ds;
+    }
+  }
+  return { pts: out, volume, avg };
+}
+
+// Next point when drawing at a held angle: head across the fall line so the natural ground drops
+// at exactly `maxG`, on whichever side is closer to where the player is pointing.
+function traverseStep(from, toward, maxG, prev = null, step = 25) {
+  const e = 8;
+  const gx = (Terrain.height(from.x + e, from.z) - Terrain.height(from.x - e, from.z)) / (2 * e);
+  const gz = (Terrain.height(from.x, from.z + e) - Terrain.height(from.x, from.z - e)) / (2 * e);
+  const S = Math.hypot(gx, gz);
+  let tx = toward.x - from.x, tz = toward.z - from.z; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+  if (S < 0.01) return null;
+  const fx = -gx / S, fz = -gz / S;                               // fall line
+  if (S <= maxG) {                                                  // gentle ground: go straight if it is downhill
+    return tx * fx + tz * fz > 0 ? { x: from.x + tx * step, z: from.z + tz * step, dx: tx, dz: tz } : null;
+  }
+  const th = Math.acos(maxG / S), c = Math.cos(th), sn = Math.sin(th);
+  const opts = [[fx * c - fz * sn, fz * c + fx * sn], [fx * c + fz * sn, fz * c - fx * sn]];
+  // keep traversing the same way (no zig-zag) unless the other side is clearly closer to the target
+  const score = (o) => o[0] * tx + o[1] * tz + (prev ? 0.6 * (o[0] * prev.dx + o[1] * prev.dz) : 0);
+  const [dx, dz] = opts.sort((p, q) => score(q) - score(p))[0];
+  if (dx * tx + dz * tz < 0.15) return null;                        // can't head that way at this angle
+  return { x: from.x + dx * step, z: from.z + dz * step, dx, dz, fallAngle: (th * 180) / Math.PI };
+}
+
+const degToGrade = (d) => Math.tan((d * Math.PI) / 180);
+const gradeToDeg = (g) => (Math.atan(g) * 180) / Math.PI;
+
 const GRADE_COLORS = [0x2f7de1, 0xe0393e, 0x18181c, 0xc04dff, 0xffa31a]; // blue, red, black, too steep, uphill
 function gradeClass(g) { return g < -0.06 ? 4 : g <= 0.25 ? 0 : g <= 0.4 ? 1 : g <= 0.9 ? 2 : 3; }
 
@@ -89,7 +148,7 @@ function initAssets() {
   MAT.roof = new THREE.MeshLambertMaterial({ color: 0x4a2a1c });
 }
 
-function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH, colors = null) {
+function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH, colors = null, flat = false) {
   const n = pts.length, across = 7, pos = new Float32Array(n * across * 3);
   const col = colors ? new Float32Array(n * across * 3) : null, tc = new THREE.Color();
   for (let i = 0; i < n; i++) {
@@ -98,7 +157,7 @@ function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH, colors = null
     for (let c = 0; c < across; c++) {
       const o = (c / (across - 1) - 0.5) * width;
       const x = pts[i].x - dz * o, z = pts[i].z + dx * o, k = (i * across + c) * 3;
-      pos[k] = x; pos[k + 1] = Terrain.height(x, z) + 2; pos[k + 2] = z;
+      pos[k] = x; pos[k + 1] = (flat ? pts[i].y : Terrain.height(x, z)) + 2; pos[k + 2] = z;
       if (col) { tc.set(colors[i]); col[k] = tc.r; col[k + 1] = tc.g; col[k + 2] = tc.b; }
     }
   }
@@ -209,6 +268,25 @@ const Net = {
     return l;
   },
 
+  refreshHeights() {
+    for (const n of this.nodes) {
+      n.y = Terrain.height(n.x, n.z); n.vis.position.y = n.y;
+      if (n.label) n.label.pos.y = n.y + 40;
+    }
+    for (const r of this.runs) {
+      for (const p of r.dense) p.y = Terrain.height(p.x, p.z);
+      r.path = new Path(r.dense);
+      this.group.remove(r.vis); disposeGroup(r.vis);
+      r.vis = makeRibbon(r.dense, DIFF[r.diff].color); this.group.add(r.vis);
+      const s = r.dense[Math.min(6, r.dense.length - 1)]; r.label.pos.y = s.y + 22;
+    }
+    for (const l of this.lifts) {
+      this.group.remove(l.vis); Lifts.dispose(l.vis);
+      Lifts.build(l); this.group.add(l.vis);
+      l.label.pos.y = l.a.y + Math.max(l.T.towerH, 6) + 26;
+    }
+  },
+
   evacuate(l) {
     for (const s of Game.skiers) if (s.edge === l) { s.state = 'atNode'; s.edge = null; s.node = l.a; }
     l.queue.length = 0; l.carriers.length = 0;
@@ -244,9 +322,18 @@ const Net = {
     this.version++;
   },
 
-  runPlan(points, free = false) {
+  runPlan(points, free = false, gradeDeg = null) {
     if (points.length < 2) return { ok: false, msg: 'Click more points down the slope' };
-    const dense = smoothLine(points).map((p) => ({ x: p.x, y: Terrain.height(p.x, p.z), z: p.z }));
+    let dense = smoothLine(points).map((p) => ({ x: p.x, y: Terrain.height(p.x, p.z), z: p.z }));
+    let earth = null;
+    if (gradeDeg) {
+      earth = gradeProfile(dense, degToGrade(gradeDeg));
+      if (!earth.pts) {
+        return { ok: false, dense, path: new Path(dense), len: 0, drop: 0, maxG: earth.avg, diff: 2, cost: 0, colors: dense.map(() => GRADE_COLORS[3]), steepAt: 0, points, trees: 0, gradeDeg, volume: 0, earthCost: 0,
+                 msg: `This line averages ${gradeToDeg(earth.avg).toFixed(0)}°. Grading can't make it ≤ ${gradeDeg}° without moving the stations, so draw it across the slope (try Hold angle).` };
+      }
+      dense = earth.pts;
+    }
     const hc = [0];
     for (let i = 1; i < dense.length; i++) hc.push(hc[i - 1] + Math.hypot(dense[i].x - dense[i - 1].x, dense[i].z - dense[i - 1].z));
     let maxG = 0, j = 0;
@@ -273,21 +360,35 @@ const Net = {
     const path = new Path(dense), len = path.length;
     const drop = dense[0].y - dense[dense.length - 1].y;
     const diff = maxG <= 0.25 ? 0 : maxG <= 0.4 ? 1 : 2;
-    const build = len * RUN_COST_PER_M, cost = build + trees * TREE_COST;
+    const earthCost = earth ? earth.volume * EARTH_COST : 0;
+    const build = len * RUN_COST_PER_M + earthCost, cost = build + trees * TREE_COST;
     let msg = null;
     if (drop < 25) msg = 'A run has to go downhill';
     else if (climb > 10) msg = `This line climbs ${Math.round(climb)} m uphill — follow the slope down`;
-    else if (maxG > 0.9) msg = 'Too steep to groom (over 42°)';
+    else if (maxG > 0.9) msg = earth ? 'Too steep to groom (over 42°)' : 'Too steep to groom (over 42°). Turn on grading to flatten it.';
     else if (!free && cost > Game.money) msg = 'Not enough money';
-    return { ok: !msg, msg, dense, path, len, drop, maxG, diff, cost, build, trees, colors, steepAt, points };
+    return { ok: !msg, msg, dense, path, len, drop, maxG, diff, cost, build, trees, colors, steepAt, points,
+             gradeDeg, volume: earth ? earth.volume : 0, earthCost };
   },
 
   buildRun(plan, free = false) {
+    if (plan.gradeDeg && !free) {
+      const op = { pts: plan.dense.map((p) => ({ x: +p.x.toFixed(1), z: +p.z.toFixed(1), y: +p.y.toFixed(2) })),
+                   half: GRADE_HALF, margin: GRADE_MARGIN };
+      Terrain.applyEarthwork(op);
+      Game.earthworks.push(op);
+      this.refreshHeights();
+      for (const p of plan.dense) p.y = Terrain.height(p.x, p.z);
+      plan.path = new Path(plan.dense);
+      plan.len = plan.path.length;
+    }
     const A = this.pointNode(plan.points[0]), B = this.pointNode(plan.points[plan.points.length - 1]);
     const r = { kind: 'run', id: this.seq.run++, a: A, b: B, diff: plan.diff, path: plan.path, len: plan.len,
-                drop: plan.drop, maxG: plan.maxG, cost: plan.build, points: plan.points.map((p) => ({ x: p.x, z: p.z })) };
+                drop: plan.drop, maxG: plan.maxG, cost: plan.build, gradeDeg: plan.gradeDeg || null,
+                points: plan.points.map((p) => ({ x: p.x, z: p.z })) };
     r.name = `Run ${r.id}`;
     r.vis = makeRibbon(plan.dense, DIFF[r.diff].color);
+    r.dense = plan.dense;
     this.group.add(r.vis);
     const s = plan.dense[Math.min(6, plan.dense.length - 1)];
     r.label = Labels.add(String(r.id), `run run-${r.diff}`, { x: s.x, y: s.y + 22, z: s.z });
@@ -340,7 +441,7 @@ const Game = {
     this.map = map; this.scene = scene;
     this.money = START_MONEY; this.day = 1; this.time = DAY_START; this.rep = 50;
     this.skiers = []; this.speed = 1; this.paused = false; this.dayOver = false; this.arrivalAcc = 0;
-    this.debtDays = 0; this.over = null;
+    this.debtDays = 0; this.over = null; this.earthworks = [];
     this.newDayStats();
     Net.reset(scene);
     for (const p of map.places) if (p.kind === 'base') Net.addNode(p.x, p.z, { base: true, name: p.name });
@@ -579,12 +680,16 @@ const Game = {
       nodes: Net.nodes.filter((n) => !n.base).map((n) => ({ id: n.id, x: n.x, z: n.z })),
       bases: Net.nodes.filter((n) => n.base).map((n) => ({ id: n.id, name: n.name })),
       lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id, opt: l.opt, name: l.name })),
-      runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points })),
+      runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points, gradeDeg: r.gradeDeg, diff: r.diff, maxG: r.maxG })),
       trees: Terrain.treeMask(),
+      earthworks: this.earthworks,
     };
   },
 
   restore(d) {
+    // replay terrain edits first so everything is rebuilt on the graded ground
+    for (const op of d.earthworks || []) { Terrain.applyEarthwork(op); this.earthworks.push(op); }
+    if (this.earthworks.length) Net.refreshHeights();
     const byId = new Map();
     for (const b of d.bases) { const n = Net.nodes.find((x) => x.base && x.name === b.name); if (n) byId.set(b.id, n); }
     for (const n of d.nodes) byId.set(n.id, Net.addNode(n.x, n.z));
@@ -596,8 +701,12 @@ const Game = {
     for (const r of d.runs) {
       const pts = r.points.map((p) => ({ ...p }));
       pts[0].node = byId.get(r.a); pts[pts.length - 1].node = byId.get(r.b);
-      const plan = Net.runPlan(pts, true);
-      if (plan.dense) Net.buildRun(plan, true);
+      const plan = Net.runPlan(pts, true);   // terrain is already graded; recompute on the real surface
+      if (plan.dense) {
+        if (r.gradeDeg) plan.gradeDeg = r.gradeDeg;
+        if (r.diff != null) { plan.diff = r.diff; plan.maxG = r.maxG; }
+        Net.buildRun(plan, true);
+      }
     }
     Net.pruneNodes();
     if (d.trees) Terrain.applyTreeMask(d.trees);
@@ -665,13 +774,13 @@ const Game = {
         c.riders.forEach((s, k) => {
           if (T.kind === 'aerial') {
             const o = (k - (n - 1) / 2) * 0.62 * CS;
-            putSkier(p.x + px * o, p.y - 2.6 * CS, p.z + pz * o, 0.42, s.skill);
+            putSkier(p.x + px * o, p.y - 2.75 * CS, p.z + pz * o, 0.55, s.skill);
           } else putSkier(p.x + px * (k ? 1.5 : -1.5), p.y + 5.5, p.z + pz * (k ? 1.5 : -1.5), 0.8, s.skill);
         });
       }
       l.queue.forEach((s, k) => {
         const row = Math.floor(k / 6), col = (k % 6) - 2.5;
-        const x = l.a.x - ux * (22 + row * 7) + px * col * 6, z = l.a.z - uz * (22 + row * 7) + pz * col * 6;
+        const x = l.a.x - ux * (34 + row * 7) + px * col * 6, z = l.a.z - uz * (34 + row * 7) + pz * col * 6;
         putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
       });
     }

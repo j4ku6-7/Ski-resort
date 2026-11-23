@@ -54,12 +54,40 @@ const Terrain = {
 
   buildMesh() {
     const { nx, nz, cell: c, H } = this;
-    const pos = new Float32Array(nx * nz * 3), col = new Float32Array(nx * nz * 3);
+    const pos = new Float32Array(nx * nz * 3);
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        const k = j * nx + i;
+        pos[3 * k] = i * c; pos[3 * k + 1] = H[k]; pos[3 * k + 2] = j * c;
+      }
+    }
+    this.computeColors();
+    const idx = new Uint32Array((nx - 1) * (nz - 1) * 6);
+    let p = 0;
+    for (let j = 0; j < nz - 1; j++) {
+      for (let i = 0; i < nx - 1; i++) {
+        const a = j * nx + i, b = a + 1, cc = a + nx, d = cc + 1;
+        idx[p++] = a; idx[p++] = cc; idx[p++] = b;
+        idx[p++] = b; idx[p++] = cc; idx[p++] = d;
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(this.baseColors.slice(), 3));  // own copy: overlays swap into it
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.computeVertexNormals();
+    this.slopeOn = false;
+    this.mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    return this.mesh;
+  },
+
+  computeColors() {
+    const { nx, nz, cell: c, H } = this;
+    const col = new Float32Array(nx * nz * 3);
     const at = (i, j) => H[Math.min(nz - 1, Math.max(0, j)) * nx + Math.min(nx - 1, Math.max(0, i))];
     for (let j = 0; j < nz; j++) {
       for (let i = 0; i < nx; i++) {
         const k = j * nx + i, y = H[k];
-        pos[3 * k] = i * c; pos[3 * k + 1] = y; pos[3 * k + 2] = j * c;
         const g = Math.hypot(at(i + 1, j) - at(i - 1, j), at(i, j + 1) - at(i, j - 1)) / (2 * c);
         const e = this.elev(y);
         const noise = (Math.sin(i * 12.9898 + j * 78.233) * 43758.5453) % 1 * 0.05;
@@ -72,25 +100,70 @@ const Terrain = {
         col[3 * k] = r; col[3 * k + 1] = gr; col[3 * k + 2] = b;
       }
     }
-    const idx = new Uint32Array((nx - 1) * (nz - 1) * 6);
-    let p = 0;
-    for (let j = 0; j < nz - 1; j++) {
-      for (let i = 0; i < nx - 1; i++) {
-        const a = j * nx + i, b = a + 1, cc = a + nx, d = cc + 1;
-        idx[p++] = a; idx[p++] = cc; idx[p++] = b;
-        idx[p++] = b; idx[p++] = cc; idx[p++] = d;
-      }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     this.baseColors = col;
     this.slopeColors = this.makeSlopeColors(col);
-    this.mesh = null;
-    geo.setIndex(new THREE.BufferAttribute(idx, 1));
-    geo.computeVertexNormals();
-    this.mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
-    return this.mesh;
+  },
+
+  // Cut-and-fill along a graded piste. op.pts = centreline with target heights {x, z, y}.
+  // Flat across the piste, blending back to natural ground over `margin`. Returns m³ moved.
+  applyEarthwork(op) {
+    const { nx, nz, cell: c, H } = this, pts = op.pts;
+    const half = op.half, margin = op.margin, reach = half + margin;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
+    const i0 = Math.max(0, Math.floor((x0 - reach) / c)), i1 = Math.min(nx - 1, Math.ceil((x1 + reach) / c));
+    const j0 = Math.max(0, Math.floor((z0 - reach) / c)), j1 = Math.min(nz - 1, Math.ceil((z1 + reach) / c));
+    // trees in the zone: remember their ground height so they can follow the new surface (or be removed)
+    const trees = this.trees ? this.treesNear(pts, reach).map((i) => {
+      const x = this.trees.pts[3 * i], z = this.trees.pts[3 * i + 1];
+      return { i, x, z, y: this.height(x, z) };
+    }) : [];
+    let volume = 0;
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const x = i * c, z = j * c;
+        let best = Infinity, ty = 0;
+        for (let k = 0; k < pts.length - 1; k++) {
+          const a = pts[k], b = pts[k + 1], dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
+          if (Math.abs(x - a.x) > reach + 20 && Math.abs(x - b.x) > reach + 20) continue;
+          const t = l2 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2)) : 0;
+          const d = Math.hypot(x - a.x - t * dx, z - a.z - t * dz);
+          if (d < best) { best = d; ty = a.y + (b.y - a.y) * t; }
+        }
+        if (best > reach) continue;
+        const w = best <= half ? 1 : 1 - smoothstep(half, reach, best);
+        const k = j * nx + i, dh = (ty - H[k]) * w;
+        if (Math.abs(dh) < 0.01) continue;
+        H[k] += dh; volume += Math.abs(dh) * c * c;
+      }
+    }
+    if (this.trees) {
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0), m = new THREE.Matrix4(), cut = [];
+      for (const t of trees) {
+        const ny = this.height(t.x, t.z);
+        if (Math.abs(ny - t.y) > 1.5) { cut.push(t.i); continue; }       // dug out or buried
+        this.trees.mesh.getMatrixAt(t.i, m); m.elements[13] = ny - 1; this.trees.mesh.setMatrixAt(t.i, m);
+      }
+      this.cutTrees(cut);
+      this.trees.mesh.instanceMatrix.needsUpdate = true;
+    }
+    this.refreshMesh();
+    return volume;
+  },
+
+  refreshMesh() {
+    this.maxY = 0;
+    for (const h of this.H) if (h > this.maxY) this.maxY = h;
+    if (!this.mesh) return;
+    const pos = this.mesh.geometry.attributes.position;
+    for (let k = 0; k < this.H.length; k++) pos.array[3 * k + 1] = this.H[k];
+    pos.needsUpdate = true;
+    this.mesh.geometry.computeVertexNormals();
+    this.mesh.geometry.computeBoundingSphere();
+    this.computeColors();
+    const attr = this.mesh.geometry.attributes.color;
+    attr.array.set(this.slopeOn ? this.slopeColors : this.baseColors);
+    attr.needsUpdate = true;
   },
 
   // Piste-grade overlay: blue <= 25 %, red <= 40 %, black <= 90 %, purple = too steep.

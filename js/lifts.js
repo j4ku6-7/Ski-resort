@@ -15,47 +15,47 @@ const LIFT_TYPES = {
     name: 'T-bar', icon: '⊤', kind: 'surface', model: 'tbar',
     speed: 3, interval: 4.5, seats: 2, minLen: 100, maxLen: 1500, minVert: 10, maxGrade: 0.6,
     baseCost: 30000, perM: 45, towerCost: 3000, opBase: 1200, opPerM: 0.8, cold: 1.2,
-    gauge: 3, towerGap: 100, towerH: 7, maxClear: 10, sag: 0.008, comfort: -1, beginnerPenalty: 5, station: 0x7c8794,
+    gauge: 4.5, towerGap: 100, towerH: 10, maxClear: 13, sag: 0.008, comfort: -1, beginnerPenalty: 5, station: 0x7c8794,
     desc: 'A cheap surface lift that drags skiers uphill. Beginners hate it, and slopes are limited to 60%.',
   },
   chair2: {
     name: 'Double chair', icon: '⑂', kind: 'aerial', model: 'chair2',
     speed: 2.3, interval: 5.5, seats: 2, minLen: 150, maxLen: 2200, minVert: 20,
     baseCost: 40000, perM: 45, towerCost: 6000, opBase: 1500, opPerM: 1.0, cold: 1,
-    gauge: 2.6, towerGap: 95, towerH: 9, maxClear: 35, sag: 0.02, comfort: 0, station: 0x8a96a3,
+    gauge: 4.6, towerGap: 95, towerH: 17, hang: 3.7, maxClear: 45, sag: 0.02, comfort: 0, station: 0x8a96a3,
     desc: 'Fixed-grip double chair. Cheap but slow; long rides get cold.',
   },
   chair4: {
     name: 'Detachable quad', icon: '⑃', kind: 'aerial', model: 'chair4',
     speed: 5, interval: 6, seats: 4, minLen: 150, maxLen: 3000, minVert: 20,
     baseCost: 120000, perM: 70, towerCost: 9000, opBase: 3000, opPerM: 1.6, cold: 1,
-    gauge: 3.4, towerGap: 120, towerH: 11, maxClear: 40, sag: 0.02, comfort: 1, station: 0x4f6d8f,
+    gauge: 6.5, towerGap: 120, towerH: 18, hang: 3.7, maxClear: 50, sag: 0.02, comfort: 1, station: 0x4f6d8f,
     desc: 'High-speed chairs that slow down in the stations. The workhorse lift.',
   },
   chair6: {
     name: '6-seat bubble chair', icon: '⑆', kind: 'aerial', model: 'chair6', bubble: true,
     speed: 5, interval: 5.4, seats: 6, minLen: 150, maxLen: 3200, minVert: 20,
     baseCost: 200000, perM: 90, towerCost: 12000, opBase: 4500, opPerM: 2, cold: 0.3,
-    gauge: 4.2, towerGap: 125, towerH: 12, maxClear: 45, sag: 0.02, comfort: 2, station: 0x2f6bb3,
+    gauge: 8.5, towerGap: 125, towerH: 19, hang: 3.7, maxClear: 55, sag: 0.02, comfort: 2, station: 0x2f6bb3,
     desc: 'High capacity, with weather bubbles and heated seats.',
   },
   gondola: {
     name: '8-person gondola', icon: '▣', kind: 'aerial', model: 'gondola',
     speed: 6, interval: 10, seats: 8, minLen: 300, maxLen: 6000, minVert: 30,
     baseCost: 250000, perM: 120, towerCost: 15000, opBase: 6000, opPerM: 2.5, cold: 0,
-    gauge: 4.5, towerGap: 220, towerH: 18, maxClear: 80, sag: 0.025, comfort: 3, station: 0xb83a32,
+    gauge: 6, towerGap: 220, towerH: 22, hang: 3.9, maxClear: 90, sag: 0.025, comfort: 3, station: 0xb83a32,
     desc: 'Enclosed cabins for long lifts from the valley. Warm and comfortable.',
   },
   tram: {
     name: 'Aerial tramway', icon: '⛫', kind: 'tram', model: 'tram',
     speed: 10, seats: 80, dwell: 90, minLen: 400, maxLen: 5000, minVert: 100,
-    baseCost: 600000, perM: 250, towerCost: 150000, opBase: 9000, opPerM: 3, cold: 0,
-    gauge: 7, towerGap: 1400, towerH: 30, maxClear: Infinity, sag: 0.035, comfort: 5, station: 0x9a2f2f,
+    baseCost: 600000, perM: 250, towerCost: 90000, opBase: 9000, opPerM: 3, cold: 0,
+    gauge: 10, towerGap: 1400, towerH: 36, hang: 6.3, maxClear: Infinity, sag: 0.035, comfort: 5, station: 0x9a2f2f,
     desc: 'Two big cabins shuttle back and forth, with spans over cliffs and very few towers. Low capacity, but the views are spectacular.',
   },
 };
 const LIFT_ALIASES = { chair: 'chair4' };   // saves from before the lift overhaul
-const CS = 2;                               // carriers drawn 2x real size so they read at map scale
+const CS = 3.5;                             // carriers drawn 3.5x real size so they read at map scale
 
 const Lifts = {
   speed(l) { return l.T.speed * l.opt.speed; },
@@ -85,7 +85,7 @@ const Lifts = {
     const n = Math.floor(hl / T.towerGap);
     for (let k = 1; k <= n; k++) { const s = (hl * k) / (n + 1); prof.push({ s, y: ground(s) + H }); }
     prof.sort((p, q) => p.s - q.s);
-    const minClear = T.kind === 'surface' ? 2.5 : 5;
+    const minClear = T.kind === 'surface' ? 2.5 : (T.hang || 1) * CS + 3;
     const cy = (p, q, s) => {
       const span = q.s - p.s, u = (s - p.s) / span;
       return p.y + (q.y - p.y) * u - 4 * T.sag * span * u * (1 - u);
@@ -198,9 +198,9 @@ const Lifts = {
       box(4.25, 1.2, 7.45, 0, -4.1, 0, 0x26313d);              // windows
       box(4.3, 0.3, 7.5, 0, -6.15, 0, 0x5f1210);
     } else if (model === 'tbar') {
-      box(0.06, 3.6, 0.06, 0, -1.8, 0, 0x8a9099);              // spring box + rod
+      box(0.06, 2.3, 0.06, 0, -1.15, 0, 0x8a9099);             // spring box + rod
       box(0.18, 0.5, 0.18, 0, -0.25, 0, 0x2b2f35);
-      box(1.1, 0.08, 0.08, 0, -3.6, 0, 0x2b2f35);              // the T
+      box(1.1, 0.08, 0.08, 0, -2.3, 0, 0x2b2f35);              // the T
     }
     const geo = THREE.BufferGeometryUtils.mergeBufferGeometries(parts.map((g) => g.toNonIndexed()));
     geo.scale(CS, CS, CS);
@@ -257,15 +257,16 @@ const Lifts = {
     for (let i = 1; i < prof.length - 1; i++) {
       const { x, z } = at(prof[i].s), gy = ground(prof[i].s), top = prof[i].y;
       if (T.kind === 'tram') {
-        mesh(G.pylon, M.steel, x, gy - 2, z, 1.4, top - gy + 6, 1.4);
+        mesh(G.pylon, M.steel, x, gy - 2, z, 2.2, top - gy + 6, 2.2);
         mesh(G.box, M.steel, x, top + 3, z, T.gauge * 2 + 6, 2, 3);
       } else if (T.kind === 'surface') {
-        mesh(G.pole, M.steel, x, gy - 1, z, 0.7, top - gy + 1.5, 0.7);
+        mesh(G.pole, M.steel, x, gy - 1, z, 1.1, top - gy + 1.5, 1.1);
         mesh(G.box, M.steel, x + px * T.gauge / 2, top + 0.3, z + pz * T.gauge / 2, T.gauge + 1, 0.4, 0.4);
       } else {
-        mesh(G.pole, M.steel, x, gy - 1, z, T.towerH > 12 ? 1.5 : 1, top - gy + 2, T.towerH > 12 ? 1.5 : 1);
-        mesh(G.box, M.steel, x, top + 1.2, z, T.gauge * 2 + 1.5, 0.6, 0.6);
-        for (const sgn of [1, -1]) mesh(G.box, M.dark, x + px * T.gauge * sgn, top + 0.4, z + pz * T.gauge * sgn, 0.6, 0.7, 4.5);
+        const r = T.towerH > 20 ? 2.6 : 2;
+        mesh(G.pole, M.steel, x, gy - 1, z, r, top - gy + 3, r);
+        mesh(G.box, M.steel, x, top + 2, z, T.gauge * 2 + 2.5, 1.1, 1.1);
+        for (const sgn of [1, -1]) mesh(G.box, M.dark, x + px * T.gauge * sgn, top + 0.8, z + pz * T.gauge * sgn, 1, 1.3, 8);
       }
     }
 
@@ -274,27 +275,27 @@ const Lifts = {
       const { x, z } = at(s), cableY = n.y + T.towerH;
       const back = drive ? -1 : 1;                       // the bullwheel sits at the outer end
       if (T.kind === 'tram') {
-        mesh(G.box, M.concrete, x + ux * back * 8, n.y + 9, z + uz * back * 8, 26, 22, 30);
-        mesh(G.box, M.station.tram, x + ux * back * 8, n.y + 21, z + uz * back * 8, 28, 3, 32);
+        mesh(G.box, M.concrete, x + ux * back * 14, n.y + T.towerH / 2, z + uz * back * 14, T.gauge * 2 + 24, T.towerH + 8, 48);
+        mesh(G.box, M.station.tram, x + ux * back * 14, n.y + T.towerH + 5, z + uz * back * 14, T.gauge * 2 + 28, 4, 52);
       } else if (T.kind === 'surface') {
         mesh(G.wheel, M.wheel, x + ux * back * 2, cableY, z + uz * back * 2, T.gauge, 1, T.gauge, 0);
         mesh(G.pole, M.steel, x + ux * back * 2, n.y - 1, z + uz * back * 2, 1, T.towerH + 1, 1);
-        if (drive) mesh(G.box, M.station.tbar, x - ux * 8 - px * 10, n.y + 2.5, z - uz * 8 - pz * 10, 7, 5, 6);
+        if (drive) mesh(G.box, M.station.tbar, x - ux * 10 - px * 14, n.y + 4, z - uz * 10 - pz * 14, 11, 8, 9);
       } else {
         const wx = x + ux * back * 3, wz = z + uz * back * 3;
         mesh(G.wheel, M.wheel, wx, cableY + 0.5, wz, T.gauge, 1, T.gauge, 0);       // bullwheel
         if (l.type === 'chair2') {
-          mesh(G.pole, M.steel, wx, n.y - 1, wz, 1.4, T.towerH + 1.5, 1.4);
-          mesh(G.box, M.roof, wx, cableY + 2.2, wz, T.gauge * 2 + 4, 1, 7);
+          mesh(G.pole, M.steel, wx, n.y - 1, wz, 2.4, T.towerH + 1.5, 2.4);
+          mesh(G.box, M.roof, wx, cableY + 3, wz, T.gauge * 2 + 6, 1.5, 11);
         } else {                                          // detachable/gondola terminal building
-          const len = T.kind === 'aerial' && T.model === 'gondola' ? 34 : 26;
+          const len = T.model === 'gondola' ? 52 : 40;
           const cx = x + ux * back * (len / 2 - 6), cz = z + uz * back * (len / 2 - 6);
-          mesh(G.box, M.station[l.type], cx, cableY + 3, cz, T.gauge * 2 + 7, 4, len);
-          mesh(G.box, M.roof, cx, cableY + 5.5, cz, T.gauge * 2 + 9, 1, len + 2);
+          mesh(G.box, M.station[l.type], cx, cableY + 4, cz, T.gauge * 2 + 12, 7, len);
+          mesh(G.box, M.roof, cx, cableY + 8, cz, T.gauge * 2 + 15, 1.5, len + 4);
           for (const sgn of [1, -1]) {
-            mesh(G.pole, M.concrete, cx + px * (T.gauge + 3) * sgn, n.y - 1, cz + pz * (T.gauge + 3) * sgn, 1.6, cableY - n.y + 2, 1.6);
+            mesh(G.pole, M.concrete, cx + px * (T.gauge + 5) * sgn, n.y - 1, cz + pz * (T.gauge + 5) * sgn, 2.6, cableY - n.y + 2, 2.6);
           }
-          if (drive) mesh(G.box, M.concrete, cx - ux * 4, n.y + 3, cz - uz * 4, T.gauge * 2 + 6, 6, 12);
+          if (drive) mesh(G.box, M.concrete, cx - ux * 6, n.y + 4, cz - uz * 6, T.gauge * 2 + 10, 8, 18);
         }
       }
     }

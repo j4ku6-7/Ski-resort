@@ -67,6 +67,17 @@
 
   <div id="lift-types" class="side-panel" hidden></div>
 
+  <div id="run-options" class="side-panel" hidden>
+    <b>Piste angle &amp; grading</b>
+    <label class="toggle"><input type="checkbox" id="ro-hold"> Hold angle while drawing</label>
+    <p class="dim small">The run steers across the hillside so the natural slope drops at exactly this angle. The steeper the hill, the more it traverses.</p>
+    <label class="toggle"><input type="checkbox" id="ro-grade"> Terraform this run</label>
+    <p class="dim small">Bulldozers cut and fill along the run so it is never steeper than the angle you pick, and level it side to side across the hill. Earthworks cost €0.50 per m³. The stations keep their height, so a steep straight line can't be graded gentle; traverse instead.</p>
+    <label class="slider">Max steepness <input type="range" id="ro-deg" min="4" max="35" step="1"><span id="ro-deg-v"></span></label>
+    <div class="presets"><button data-deg="12">Blue 12°</button><button data-deg="19">Red 19°</button><button data-deg="27">Black 27°</button></div>
+    <p class="dim small">Blue ≤ 14° (25%) · Red ≤ 22° (40%) · Black steeper. Without grading, the run follows the natural slope.</p>
+  </div>
+
   <div id="lift-panel" class="side-panel" hidden>
     <div class="ph"><input id="lp-name" maxlength="24" aria-label="Lift name"><button id="lp-close" aria-label="Close">✕</button></div>
     <div id="lp-type" class="dim"></div>

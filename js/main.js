@@ -48,6 +48,7 @@ const UI = {
 
 const App = {
   tool: 'select', draft: null, hover: null, preview: null, liftType: 'chair4', panelLift: null,
+  grading: false, holdAngle: false, gradeDeg: 13,
 
   init() {
     const menu = $('#resorts');
@@ -137,6 +138,7 @@ const App = {
 
     this.bindInput();
     this.bindLiftPanel();
+    this.bindRunOptions();
     this.buildLiftPicker();
     $('#resort-name').textContent = map.name;
     this.setTool('select');
@@ -209,6 +211,7 @@ const App = {
     this.tool = t;
     this.draft = t === 'lift' ? { a: null } : t === 'run' ? { pts: [] } : null;
     $('#lift-types').hidden = t !== 'lift';
+    $('#run-options').hidden = t !== 'run';
     for (const b of document.querySelectorAll('[data-tool]')) b.classList.toggle('active', b.dataset.tool === t);
     const drawing = t === 'run' || t === 'cut';
     Terrain.showSlopeMap(t === 'run');
@@ -324,18 +327,21 @@ const App = {
           (plan.ok ? ' — click to build' : ` — <span class="neg">${plan.msg}</span>`) + ' · Esc to cancel';
       }
     } else if (t === 'run') {
-      const pts = h ? [...d.pts, h] : d.pts;
+      const pts = h ? (this.holdAngle && d.pts.length ? this.heldPath(d.pts, h) : [...d.pts, h]) : d.pts;
       if (!d.pts.length) hint = 'Drag from a lift top down the slope to draw a run, or click point by point. The map shows the steepness. <span class="dim">Right-drag to rotate.</span>';
       else if (pts.length >= 2) {
-        const plan = Net.runPlan(pts);
+        const plan = Net.runPlan(pts, false, this.grade());
         if (plan.dense) {
-          this.preview = makeRibbon(plan.dense, null, 0.7, RUN_WIDTH, plan.colors);
+          this.preview = makeRibbon(plan.dense, null, 0.7, plan.gradeDeg ? GRADE_HALF * 2 : RUN_WIDTH, plan.colors, !!plan.gradeDeg);
+          if (plan.gradeDeg) { this.preview.material.depthTest = false; this.preview.renderOrder = 9; }
           this.scene.add(this.preview);
           const sp = plan.dense[plan.steepAt];
           Object.assign(this.steepPos, { x: sp.x, y: sp.y + 30, z: sp.z });
           this.steepLabel.set(`steepest ${Math.round(plan.maxG * 100)}%`); this.steepLabel.show(plan.maxG > 0.05);
           hint = `<b style="color:${DIFF[plan.diff].css === '#18181c' ? '#fff' : DIFF[plan.diff].css}">${DIFF[plan.diff].name}</b> · ${(plan.len / 1000).toFixed(2)} km · drop ${fmt(plan.drop)} m · steepest ${Math.round(plan.maxG * 100)}% · <b>${money(plan.cost)}</b>` +
             (plan.trees ? ` <span class="dim">(incl. ${plan.trees} trees)</span>` : '') +
+            (plan.gradeDeg ? `<br>Grading to ≤ ${plan.gradeDeg}°: ${fmt(plan.volume)} m³ of cut and fill · ${money(plan.earthCost)}` : '') +
+            (this.holdAngle && pts[pts.length - 2] && pts[pts.length - 2].fallAngle ? `<br><span class="dim">Holding ${this.gradeDeg}° by heading ${Math.round(pts[pts.length - 2].fallAngle)}° off the fall line</span>` : '') +
             (plan.ok ? '' : ` — <span class="neg">${plan.msg}</span>`) +
             '<br><span class="dim">Keep dragging or clicking · end on a lift or lodge to finish, or press Enter · Backspace undo · Esc cancel</span>';
         }
@@ -370,10 +376,50 @@ const App = {
     } else if (t === 'run' && h) {
       const last = d.pts[d.pts.length - 1];
       if (last && Math.hypot(last.x - h.x, last.z - h.z) < 15) return;
-      d.pts.push({ ...h });
-      if (d.pts.length >= 2 && h.node && h.node !== d.pts[0].node) return this.finishRun();
+      if (this.holdAngle && d.pts.length) { d.pts = this.heldPath(d.pts, h); }
+      else d.pts.push({ ...h });
+      const end = d.pts[d.pts.length - 1];
+      if (d.pts.length >= 2 && end.node && end.node !== d.pts[0].node) return this.finishRun();
     }
     this.updateHover();
+  },
+
+  grade() { return this.grading ? this.gradeDeg : null; },
+
+  // Extend the run from its last point toward `h`, traversing the hill at the held angle.
+  // Snaps onto a lift/lodge when the traverse arrives next to it. `partial` = mid-drag (no snapping).
+  heldPath(pts, h, partial = false) {
+    const out = pts.slice(), G = degToGrade(this.gradeDeg);
+    let cur = out[out.length - 1];
+    for (let k = 0; k < 120; k++) {
+      if (Math.hypot(h.x - cur.x, h.z - cur.z) < 30) break;
+      const n = traverseStep(cur, h, G, cur.dx != null ? cur : null);
+      if (!n || !Terrain.inside(n.x, n.z)) break;
+      out.push(n); cur = n;
+    }
+    if (!partial && h.node && Math.hypot(h.x - cur.x, h.z - cur.z) < 90) {
+      if (Math.hypot(h.x - cur.x, h.z - cur.z) < 15) out.pop();
+      out.push({ ...h });
+    }
+    return out;
+  },
+
+  bindRunOptions() {
+    const sync = () => {
+      const g = degToGrade(this.gradeDeg), cls = g <= 0.25 ? 0 : g <= 0.4 ? 1 : 2;
+      $('#ro-grade').checked = this.grading;
+      $('#ro-hold').checked = this.holdAngle;
+      $('#ro-deg').value = this.gradeDeg;
+      $('#ro-deg').disabled = !this.grading && !this.holdAngle;
+      $('#ro-deg-v').innerHTML = `${this.gradeDeg}° · ${Math.round(g * 100)}% · <b class="diff-${cls}">${DIFF[cls].name}</b>`;
+      for (const b of document.querySelectorAll('[data-deg]')) b.classList.toggle('active', this.grading && +b.dataset.deg === this.gradeDeg);
+      this.updateHover();
+    };
+    $('#ro-grade').onchange = (e) => { this.grading = e.target.checked; sync(); };
+    $('#ro-hold').onchange = (e) => { this.holdAngle = e.target.checked; sync(); };
+    $('#ro-deg').oninput = (e) => { this.gradeDeg = +e.target.value; sync(); };
+    for (const b of document.querySelectorAll('[data-deg]')) b.onclick = () => { this.grading = this.holdAngle = true; this.gradeDeg = +b.dataset.deg; sync(); };
+    sync();
   },
 
   buildLiftPicker() {
@@ -467,6 +513,7 @@ const App = {
     }
     const pts = this.draft.pts, last = pts[pts.length - 1];
     if (!last) { pts.push({ ...h }); return; }
+    if (this.holdAngle) { this.draft.pts = this.heldPath(pts, h, true); return; }
     const gap = Math.hypot(last.x - h.x, last.z - h.z);
     if (gap >= 30 || (h.node && h.node !== last.node && gap > 5)) pts.push({ ...h });
   },
@@ -476,8 +523,10 @@ const App = {
       if (this.stroke.cut) { UI.toast(`Felled ${this.stroke.cut} trees for ${money(this.stroke.cut * TREE_COST)}`); Save.write(); }
       return;
     }
-    const pts = this.draft.pts, h = this.hover, last = pts[pts.length - 1];
-    if (h && last && Math.hypot(last.x - h.x, last.z - h.z) > 10) pts.push({ ...h });
+    const h = this.hover;
+    if (this.holdAngle && h) this.draft.pts = this.heldPath(this.draft.pts, h);
+    const pts = this.draft.pts, last = pts[pts.length - 1];
+    if (!this.holdAngle && h && last && Math.hypot(last.x - h.x, last.z - h.z) > 10) pts.push({ ...h });
     const end = pts[pts.length - 1];
     if (pts.length >= 2 && end.node && end.node !== pts[0].node) this.finishRun();
     else this.updateHover();
@@ -486,7 +535,7 @@ const App = {
   finishRun() {
     const d = this.draft;
     if (this.tool !== 'run' || !d || d.pts.length < 2) return;
-    const plan = Net.runPlan(d.pts);
+    const plan = Net.runPlan(d.pts, false, this.grade());
     if (!plan.ok) { d.pts.pop(); this.updateHover(); return UI.toast(plan.msg); }
     const r = Net.buildRun(plan);
     UI.toast(`${r.name} (${DIFF[r.diff].name}) built for ${money(plan.cost)}`);

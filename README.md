@@ -34,4 +34,9 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
 
 Keys: `1`–`5` pick tools, `Esc` cancels, `Backspace` removes the last run point, `[` `]` change the tree brush size, `Space` pauses.
 
+**Piste angle & grading** (in the run tool panel):
+- **Hold angle while drawing:** the run steers across the hillside so the natural ground drops at the angle you pick. On a steep hill it traverses more.
+- **Terraform this run:** bulldozers cut and fill so no pitch is steeper than that angle, and level the piste side to side across the hill, blending back to the natural slope at the edges. Earthworks cost €0.50 per m³. The stations keep their height, so a steep straight line can't be graded into a blue; traverse instead.
+- Blue ≤ 14° (25%), Red ≤ 22° (40%), Black steeper. Earthworks are saved and replayed on load.
+
 **Trees:** felling costs €150 per tree, and runs and lifts through forest include that cost. Clear more than 10% of the forest and the views suffer, so fewer visitors come. Use the Cut trees tool to clear areas by hand.

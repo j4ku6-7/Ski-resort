@@ -126,3 +126,10 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 .danger-btn { width: 100%; margin-top: 8px; background: #e8eef5; color: #9b1c1c; }
 .danger-btn.confirm { background: #c62f2f; color: #fff; }
 #toasts { top: auto; bottom: 70px; }
+
+/* ---------- run grading ---------- */
+#run-options b.diff-0 { color: #2f7de1; } #run-options b.diff-1 { color: #e0393e; } #run-options b.diff-2 { color: #18181c; }
+.presets { display: flex; gap: 6px; margin-top: 8px; }
+.presets button { flex: 1; border: 1px solid #cfd8e3; background: #fff; border-radius: 8px; padding: 6px 4px; font-size: 12.5px; }
+.presets button.active { border-color: #1f6feb; background: #eef4ff; font-weight: 700; }
+.presets button:nth-child(1) { color: #2f7de1; } .presets button:nth-child(2) { color: #e0393e; }
