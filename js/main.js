@@ -235,7 +235,7 @@ const App = {
         const ed = this.edit, T = ed.l.T;
         if ((e.key === '+' || e.key === '=' || e.key === '-') && ed.sel != null) {
           const t = ed.towers[ed.sel], step = (e.shiftKey ? 5 : 1) * (e.key === '-' ? -1 : 1);
-          t.h = clamp(t.h + step, this.minPylon(T), T.maxTowerH); this.applyPylons(); e.preventDefault(); return;
+          t.h = clamp(t.h + step, this.minPylon(T), Lifts.maxPylonH(T, Lifts.pylonType(ed.l, t))); this.applyPylons(); e.preventDefault(); return;
         }
         if ((e.key === 'Delete' || e.key === 'Backspace') && ed.sel != null) { this.removePylon(); e.preventDefault(); return; }
         if (e.key === 'Escape') { ed.sel = null; this.applyPylons(); return; }
@@ -366,7 +366,7 @@ const App = {
     else if (t === 'pylons' && this.edit) {
       const e = this.edit;
       hint = e.hover != null ? 'Drag to move this pylon along the line · click to select it'
-        : e.ghost != null ? `Click to add a pylon here (${money(Lifts.towerPrice(e.l.T, e.l.T.towerH))})`
+        : e.ghost != null ? `Click to add a pylon here (${money(Lifts.towerPrice(e.l.T, e.l.T.towerH, Lifts.pylonType(e.l)))})`
         : 'Point at the lift line to add a pylon · drag pylons to move them · <b>+ / −</b> height (Shift = 5 m) · <b>Del</b> removes · <b>Enter</b> done';
     }
     else if (t === 'cut') {
@@ -625,7 +625,7 @@ const App = {
     const T = l.T, start = (l.customTowers || Lifts.autoTowers(T, l.a, l.a.y, l.b, l.b.y)).map((t) => ({ ...t }));
     this.edit = {
       l, origCustom: l.customTowers ? l.customTowers.map((t) => ({ ...t })) : null,
-      origValue: Lifts.towersValue(T, start), towers: start, sel: null, hover: null, ghost: null, profScale: null,
+      origValue: Lifts.towersValue(T, start, Lifts.pylonType(l)), towers: start, sel: null, hover: null, ghost: null, profScale: null,
       wasOpen: l.opt.open || !!l.awaitInspection,
     };
     this.closeLiftPanel();
@@ -717,7 +717,7 @@ const App = {
     const e = this.edit, l = e.l, T = l.T;
     $('#pp-title').textContent = `${l.name} · ${T.name} pylons${l.planned ? ' (plan)' : ''}`;
     $('#pp-count').textContent = e.towers.length;
-    const diff = l.planned ? 0 : Lifts.towersValue(T, e.towers) - e.origValue;
+    const diff = l.planned ? 0 : Lifts.towersValue(T, e.towers, Lifts.pylonType(l)) - e.origValue;
     $('#pp-cost').innerHTML = Math.abs(diff) < 1 ? '—' : diff > 0 ? `<span class="neg">${money(-diff)}</span>` : `<span class="pos">refund ${money(-diff / 2)}</span>`;
     $('#pp-issues').innerHTML = l.issues.length
       ? l.issues.map((i) => `<p class="danger">⚠ ${i}</p>`).join('') + '<p class="dim small">The lift stays closed until it passes inspection.</p>'
@@ -727,8 +727,13 @@ const App = {
     if (sel) {
       const rank = this.pylonOrder ? this.pylonOrder.indexOf(e.sel) + 1 : e.sel + 1;
       $('#pp-sel-name').textContent = `Pylon ${rank} · ${Math.round(sel.s)} m along the line`;
-      const r = $('#pp-h'); r.min = this.minPylon(T); r.max = T.maxTowerH; r.value = sel.h;
-      $('#pp-h-v').textContent = `${Math.round(sel.h)} m · ${money(Lifts.towerPrice(T, sel.h))}`;
+      const style = Lifts.pylonType(l, sel), maxH = Lifts.maxPylonH(T, style);
+      if (sel.h > maxH) sel.h = maxH;
+      const r = $('#pp-h'); r.min = this.minPylon(T); r.max = maxH; r.value = sel.h;
+      $('#pp-h-v').textContent = `${Math.round(sel.h)} m · ${money(Lifts.towerPrice(T, sel.h, style))}`;
+      $('#pp-type').innerHTML = `<option value="">Lift default (${PYLONS[Lifts.pylonType(l)].name})</option>` +
+        (T.pylons || []).map((k) => `<option value="${k}">${PYLONS[k].name} · up to ${Lifts.maxPylonH(T, k)} m</option>`).join('');
+      $('#pp-type').value = sel.type || '';
     }
   },
 
@@ -801,7 +806,12 @@ const App = {
     e.towers.forEach((t, i) => {
       const g = P.ground(t.s), X = sx(t.s), sel = i === e.sel, hov = i === e.hover;
       ctx.strokeStyle = sel ? '#0aa8d6' : hov ? '#e0a400' : '#2b3440'; ctx.lineWidth = sel || hov ? 4 : 3;
-      ctx.beginPath(); ctx.moveTo(X, sy(g)); ctx.lineTo(X, sy(g + t.h)); ctx.stroke();
+      const style = Lifts.pylonType(l, t), w = Math.max(3, (sy(g) - sy(g + t.h)) * 0.12);
+      ctx.beginPath();
+      if (style === 'lattice') { ctx.moveTo(X - w, sy(g)); ctx.lineTo(X, sy(g + t.h)); ctx.lineTo(X + w, sy(g)); }
+      else if (style === 'portal') { ctx.moveTo(X - 4, sy(g)); ctx.lineTo(X - 3, sy(g + t.h)); ctx.lineTo(X + 3, sy(g + t.h)); ctx.lineTo(X + 4, sy(g)); }
+      else { ctx.moveTo(X, sy(g)); ctx.lineTo(X, sy(g + t.h)); }
+      ctx.stroke();
       ctx.fillStyle = sel ? '#35e0ff' : hov ? '#ffcf5a' : '#ffffff';
       ctx.beginPath(); ctx.arc(X, sy(g + t.h), 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       if (sel || hov || e.towers.length <= 14) {
@@ -814,7 +824,7 @@ const App = {
       const { s, h } = this.profGhost, g = P.ground(s);
       ctx.setLineDash([5, 4]); ctx.strokeStyle = '#2b3440'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(sx(s), sy(g)); ctx.lineTo(sx(s), sy(g + h)); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = '#1b2430'; ctx.fillText(`+ ${Math.round(h)} m · ${money(Lifts.towerPrice(T, h))}`, sx(s) + 6, sy(g + h) - 4);
+      ctx.fillStyle = '#1b2430'; ctx.fillText(`+ ${Math.round(h)} m · ${money(Lifts.towerPrice(T, h, Lifts.pylonType(l)))}`, sx(s) + 6, sy(g + h) - 4);
     }
   },
 
@@ -823,7 +833,7 @@ const App = {
     const at = (ev) => {
       const r = cv.getBoundingClientRect(), v = this.profileView(), x = ev.clientX - r.left, y = ev.clientY - r.top;
       const s = v.xs(x), T = this.edit.l.T, g = v.P.ground(clamp(s, 0, v.hl));
-      return { v, x, y, s, h: clamp(v.ys(y) - g, this.minPylon(T), T.maxTowerH) };
+      return { v, x, y, s, h: clamp(v.ys(y) - g, this.minPylon(T), Lifts.maxPylonH(T, Lifts.pylonType(this.edit.l))) };
     };
     const near = (p) => {
       let best = null, bd = 9;
@@ -870,7 +880,7 @@ const App = {
 
   finishPylons() {
     const e = this.edit, l = e.l, T = l.T;
-    const diff = l.planned ? 0 : Lifts.towersValue(T, e.towers) - e.origValue;
+    const diff = l.planned ? 0 : Lifts.towersValue(T, e.towers, Lifts.pylonType(l)) - e.origValue;
     if (diff > 0 && diff > Game.money) return UI.toast(`Not enough money for these pylons (${money(diff)}).`);
     if (diff > 0) Game.spend(diff); else Game.money -= diff / 2;
     this.edit = null;
@@ -903,6 +913,11 @@ const App = {
   bindPylonPanel() {
     $('#pp-h').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].h = +ev.target.value; this.applyPylons(); } };
     $('#pp-del').onclick = () => this.removePylon();
+    $('#pp-type').onchange = (ev) => {
+      const e = this.edit; if (!e || e.sel == null) return;
+      if (ev.target.value) e.towers[e.sel].type = ev.target.value; else delete e.towers[e.sel].type;
+      this.applyPylons();
+    };
     $('#pp-auto').onclick = () => { const e = this.edit, l = e.l; e.towers = Lifts.autoTowers(l.T, l.a, l.a.y, l.b, l.b.y); e.sel = null; this.applyPylons(); };
     $('#pp-cancel').onclick = () => { this.cancelPylons(); this.setTool('select'); };
     $('#pp-done').onclick = () => this.finishPylons();
@@ -914,13 +929,16 @@ const App = {
     box.innerHTML = `<b class="pk-title">Lift type</b>
       <label class="toggle"><input type="checkbox" id="manual-pylons"${this.manualPylons ? ' checked' : ''}> Place pylons myself</label>`;
     box.querySelector('#manual-pylons').onchange = (ev) => { this.manualPylons = ev.target.checked; this.updateHover(); };
+    let lastGroup = null;
     for (const [key, T] of Object.entries(LIFT_TYPES)) {
+      const group = T.kind === 'belt' || T.kind === 'surface' ? 'Surface lifts' : T.kind === 'tram' ? 'Cable car' : T.enclosed ? 'Gondolas' : 'Chairlifts';
+      if (group !== lastGroup) { const h = document.createElement('div'); h.className = 'pk-group'; h.textContent = group; box.appendChild(h); lastGroup = group; }
       const cap = T.kind === 'tram' ? 'about 400' : fmt((T.seats / T.interval) * 3600);
       const b = document.createElement('button');
       b.className = 'pick' + (key === this.liftType ? ' active' : '');
       b.innerHTML = `<span class="pk-ico">${T.icon}</span><span class="pk-name">${T.name}</span>
         <span class="pk-meta">${cap}/h · ${T.speed} m/s · ≤ ${fmt(T.maxLen)} m${T.cold === 0 ? ' · enclosed' : ''}</span>
-        <span class="pk-meta">${money(T.baseCost)} + €${T.perM}/m${T.towerCost ? ` + ${money(T.towerCost)}/tower` : ''}</span>
+        <span class="pk-meta">${money(T.baseCost)} + €${T.perM}/m${T.towerCost ? ` + ${money(T.towerCost)}/pylon` : ''}${T.seats > 4 && T.kind !== 'tram' ? ` · ${T.seats} per ${T.enclosed ? 'cabin' : 'chair'}` : ''}</span>
         <span class="pk-desc">${T.desc}</span>`;
       b.onclick = () => { this.liftType = key; this.buildLiftPicker(); this.updateHover(); };
       box.appendChild(b);
@@ -935,6 +953,16 @@ const App = {
     $('#lp-density').value = Math.round(l.opt.density * 100);
     $('#lp-density-row').hidden = T.kind === 'tram' || T.kind === 'belt';
     $('#lp-open').checked = l.opt.open;
+    const ps = $('#lp-pylon');
+    ps.innerHTML = (T.pylons || []).map((k) => `<option value="${k}">${PYLONS[k].name}</option>`).join('');
+    ps.value = Lifts.pylonType(l);
+    $('#lp-pylon-row').hidden = !(T.pylons || []).length;
+    $('#lp-colors').innerHTML = (T.kind === 'belt' ? [] : LIFT_COLORS).map((c) => {
+      const hex = '#' + c.toString(16).padStart(6, '0');
+      return `<button class="swatch${(l.opt.color != null ? l.opt.color : T.color) === c ? ' on' : ''}" data-c="${c}" style="background:${hex}" aria-label="Colour ${hex}"></button>`;
+    }).join('');
+    for (const b of $('#lp-colors').querySelectorAll('.swatch')) b.onclick = () => { Net.recolorLift(l, +b.dataset.c); Save.write(); this.openLiftPanel(l); };
+    $('#lp-color-row').hidden = T.kind === 'belt';
     const sel = $('#lp-up');
     sel.innerHTML = Object.entries(LIFT_TYPES).filter(([k]) => k !== l.type)
       .map(([k, t]) => `<option value="${k}">${t.name}</option>`).join('');
@@ -963,6 +991,8 @@ const App = {
     $('#lp-up-go').disabled = !plan.ok;
     $('#lp-up-msg').textContent = plan.ok ? '' : plan.msg;
     $('#lp-remove').textContent = `Remove lift (refund ${money(l.cost / 2)})`;
+    const sp = Net.pylonStylePlan(l, $('#lp-pylon').value);
+    $('#lp-pylon-note').textContent = `${PYLONS[Lifts.pylonType(l)].desc} Max height ${Lifts.maxPylonH(T, Lifts.pylonType(l))} m.`;
     $('#lp-inspect').innerHTML = l.issues && l.issues.length ? `<p class="danger">⚠ ${l.planned ? 'Would fail' : 'Failed'} safety inspection: ${l.issues.join('; ')}</p>` : '';
     $('#lp-plan').hidden = !l.planned;
     $('#lp-open-row').hidden = !!l.planned;
@@ -985,6 +1015,12 @@ const App = {
       Save.write(); this.refreshLiftPanel();
     };
     $('#lp-up').onchange = () => this.refreshLiftPanel();
+    $('#lp-pylon').onchange = (e) => {
+      const l = L(), r = Net.setPylonStyle(l, e.target.value);
+      if (!r.ok) { UI.toast(r.msg); e.target.value = Lifts.pylonType(l); return; }
+      UI.toast(`${l.name}: ${PYLONS[e.target.value].name.toLowerCase()} pylons${r.charge > 0 ? ` for ${money(r.charge)}` : r.charge < 0 ? `, refund ${money(-r.charge)}` : ''}`);
+      Save.write(); this.refreshLiftPanel();
+    };
     $('#lp-up-go').onclick = () => {
       const l = L(), from = l.T.name, plan = Net.upgradeLift(l, $('#lp-up').value);
       if (!plan.ok) return UI.toast(plan.msg);

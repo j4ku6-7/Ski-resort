@@ -180,3 +180,11 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 .primary-btn:disabled { background: #aab6c4; }
 .label.run.planned { opacity: .6; outline: 2px dashed #58a6ff; }
 #plans-panel { right: auto; left: 140px; }
+
+/* ---------- lift looks ---------- */
+.pk-group { margin: 10px 0 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .55; }
+.slider select { grid-column: 1 / -1; font: inherit; padding: 5px; border-radius: 7px; border: 1px solid #cfd8e3; }
+#lp-color-row { margin-top: 8px; }
+#lp-colors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #cfd8e3; padding: 0; }
+.swatch.on { box-shadow: 0 0 0 2px #1f6feb; }

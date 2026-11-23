@@ -227,7 +227,9 @@ const Net = {
     const hl = Math.hypot(b.x - a.x, b.z - a.z), vert = yb - ya, len = Math.hypot(hl, vert);
     const P = Lifts.profile(T, a, ya, b, yb, manual && T.kind !== 'belt' ? [] : null);
     const trees = Terrain.treesNear([a, b], T.gauge + 8).length;
-    const build = T.baseCost + T.perM * len + P.towers * T.towerCost, cost = build + trees * TREE_COST;
+    let towersCost = 0;
+    for (const t of P.prof.slice(1, -1)) towersCost += Lifts.towerPrice(T, t.y - P.ground(t.s));
+    const build = T.baseCost + T.perM * len + towersCost, cost = build + trees * TREE_COST;
     const grade = T.kind === 'belt' || T.kind === 'surface' ? Lifts.maxGroundGrade(P) : 0;
     const aName = (/^[aeiou8]/i.test(T.name) ? 'An ' : 'A ') + T.name.toLowerCase();
     let msg = null;
@@ -299,6 +301,7 @@ const Net = {
     this.evacuate(l);
     this.group.remove(l.vis); Lifts.dispose(l.vis);
     l.type = plan.type; l.T = plan.T; l.cost = l.planned ? 0 : plan.build; l.len = plan.len; l.customTowers = null;
+    if (!(l.T.pylons || []).includes(l.opt.pylon)) delete l.opt.pylon;
     l.clock = l.dist = l.nextD = 0; l.next = l.T.dwell || 0;
     Lifts.build(l);
     this.group.add(l.vis);
@@ -317,9 +320,30 @@ const Net = {
     return true;
   },
 
+  // Change the pylon style of the whole lift (pylons without their own style follow it).
+  pylonStylePlan(l, style) {
+    const towers = l.customTowers || Lifts.autoTowers(l.T, l.a, l.a.y, l.b, l.b.y);
+    const now = Lifts.towersValue(l.T, towers, Lifts.pylonType(l));
+    const next = Lifts.towersValue(l.T, towers.map((t) => ({ ...t, type: undefined })), style);
+    const tooTall = towers.some((t) => t.h > Lifts.maxPylonH(l.T, style));
+    const diff = l.planned ? 0 : next - now;
+    return { diff, charge: diff > 0 ? diff : diff / 2, tooTall };
+  },
+  setPylonStyle(l, style) {
+    const p = this.pylonStylePlan(l, style);
+    if (p.tooTall) return { ok: false, msg: `Some pylons are taller than ${PYLONS[style].name.toLowerCase()} pylons allow (${Lifts.maxPylonH(l.T, style)} m)` };
+    if (p.charge > Game.money) return { ok: false, msg: 'Not enough money' };
+    if (p.charge > 0) Game.spend(p.charge); else Game.money -= p.charge;
+    l.opt.pylon = style;
+    if (l.customTowers) l.customTowers = l.customTowers.map((t) => ({ s: t.s, h: t.h }));
+    this.group.remove(l.vis); Lifts.dispose(l.vis); Lifts.build(l); this.group.add(l.vis);
+    return { ok: true, charge: p.charge };
+  },
+  recolorLift(l, hex) { l.opt.color = hex; },
+
   // Replace a lift's pylons (from the pylon editor) and rebuild it.
   setTowers(l, towers) {
-    l.customTowers = towers.map((t) => ({ s: +t.s.toFixed(1), h: Math.round(t.h) }));
+    l.customTowers = towers.map((t) => (t.type ? { s: +t.s.toFixed(1), h: Math.round(t.h), type: t.type } : { s: +t.s.toFixed(1), h: Math.round(t.h) }));
     this.group.remove(l.vis); Lifts.dispose(l.vis);
     Lifts.build(l); this.group.add(l.vis);
     if (l.issues.length) this.setLiftOpen(l, false);
@@ -443,7 +467,7 @@ const Net = {
   planCost(e) {
     if (e.kind === 'lift') {
       const T = e.T, towers = e.customTowers || Lifts.autoTowers(T, e.a, e.a.y, e.b, e.b.y);
-      const build = T.baseCost + T.perM * e.len + Lifts.towersValue(T, towers);
+      const build = T.baseCost + T.perM * e.len + Lifts.towersValue(T, towers, Lifts.pylonType(e));
       return { build, total: build + Terrain.treesNear([e.a, e.b], T.gauge + 8).length * TREE_COST };
     }
     let earth = 0;
@@ -881,15 +905,17 @@ const Game = {
     }
     const cm = this.carMeshes, cnt = {};
     for (const k in cm) cnt[k] = 0;
+    let col = null;
     const putCar = (model, x, y, z, q) => {
       const im = cm[model];
       if (cnt[model] >= im.instanceMatrix.count) return;
-      M.compose(V.set(x, y, z), q, S.set(1, 1, 1)); im.setMatrixAt(cnt[model]++, M);
+      M.compose(V.set(x, y, z), q, S.set(1, 1, 1)); im.setColorAt(cnt[model], col); im.setMatrixAt(cnt[model]++, M);
       if (model === 'chair6') cm.bubble.setMatrixAt(cnt.bubble++, M);
     };
     for (const l of Net.lifts) {
       if (l.planned) continue;
       const T = l.T, L = l.upPath.length, { ux, uz, px, pz } = l.dir, v = Lifts.speed(l);
+      col = Lifts.colorOf(l);
       if (T.kind === 'tram') {
         // cabin A on the uphill track, cabin B mirrored on the other one
         const tUp = L / v, period = Lifts.interval(l), ph = (l.clock - (l.next - period) + period) % period;
@@ -903,7 +929,7 @@ const Game = {
           p = l.downPath.at(d, TMP); putCar(T.model, p.x, p.y, p.z, l.quatDown);
         }
       }
-      const visible = T.model !== 'gondola' && T.kind !== 'tram';
+      const visible = !T.enclosed;
       if (visible) for (const c of l.carriers) {
         const p = l.upPath.at(c.d, TMP), n = c.riders.length;
         c.riders.forEach((s, k) => {
@@ -919,7 +945,7 @@ const Game = {
         putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
       });
     }
-    for (const k in cm) { cm[k].count = cnt[k]; cm[k].instanceMatrix.needsUpdate = true; }
+    for (const k in cm) { cm[k].count = cnt[k]; cm[k].instanceMatrix.needsUpdate = true; if (cm[k].instanceColor) cm[k].instanceColor.needsUpdate = true; }
     sm.count = si;
     sm.instanceMatrix.needsUpdate = true;
     if (sm.instanceColor) sm.instanceColor.needsUpdate = true;

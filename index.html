@@ -89,6 +89,9 @@
     <label class="slider">Line speed <input type="range" id="lp-speed" min="50" max="100" step="5"><span id="lp-speed-v"></span></label>
     <label class="slider" id="lp-density-row">Carriers on the line <input type="range" id="lp-density" min="40" max="100" step="10"><span id="lp-density-v"></span></label>
     <p class="dim small">Slower and fewer carriers cut running costs but lower capacity.</p>
+    <label class="slider" id="lp-pylon-row">Pylon style <select id="lp-pylon" aria-label="Pylon style"></select></label>
+    <p id="lp-pylon-note" class="dim small"></p>
+    <div id="lp-color-row"><span class="small">Colour</span><div id="lp-colors"></div></div>
     <div id="lp-inspect"></div>
     <div id="lp-plan" hidden><p class="plan-tag">📐 This lift is only a plan. Skiers can't use it until you build it.</p><button id="lp-build" class="primary-btn"></button></div>
     <label class="toggle" id="lp-open-row"><input type="checkbox" id="lp-open"> Open for skiers</label>
@@ -104,6 +107,7 @@
     <div id="pp-sel" hidden>
       <div class="row"><span>Selected</span><b id="pp-sel-name"></b></div>
       <label class="slider">Height <input type="range" id="pp-h" step="1"><span id="pp-h-v"></span></label>
+      <label class="slider">Style <select id="pp-type" aria-label="Pylon style"></select></label>
       <button id="pp-del" class="danger-btn">Remove pylon</button>
     </div>
     <div id="pp-issues"></div>

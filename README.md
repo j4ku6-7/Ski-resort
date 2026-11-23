@@ -25,10 +25,16 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
    | Double chair | 1 300/h | 2.3 m/s | fixed grip, cheap, long rides get cold |
    | Detachable quad | 2 400/h | 5 m/s | the workhorse |
    | 6-seat bubble chair | 4 000/h | 5 m/s | weather bubbles keep riders warm |
+   | 6-person gondola | 2 400/h | 5 m/s | compact, cheaper gondola |
    | 8-person gondola | 2 880/h | 6 m/s | enclosed, up to 6 km |
+   | 10-person gondola | 3 600/h | 6 m/s | panoramic cabins |
+   | Funitel | 4 800/h | 7 m/s | wide cabins on twin ropes, very stable |
+   | 3S tricable gondola | 4 800/h | 7.5 m/s | spans of several km, only a few huge pylons |
    | Aerial tramway | about 400/h | 10 m/s | two shuttling cabins, very few towers, spans cliffs |
 
    **Pylons:** tick *Place pylons myself* in the lift picker, or press *Edit pylons* in a lift's panel. Click the lift line to add a pylon, drag pylons along the line, use `+`/`−` to change their height (Shift = 5 m steps) and `Del` to remove one. Taller pylons cost more. The rope is coloured by the safety check: green is fine, orange is tight, red means carriers hit the snow, and yellow means chairs hang too high above the ground to evacuate. Spans that are too long are flagged as well. A lift that fails inspection stays closed. Press Done to pay for the changes (removed pylons are refunded at 50%), or Cancel to revert. Placing pylons yourself is often cheaper than the automatic layout. The editor flies the camera to a side view of the lift and opens a **side-view profile** along the bottom of the screen, with the vertical scale stretched so every pylon is visible. Click it to add a pylon at that height, drag a pylon left/right to move it or up/down to change its height, and right-click to remove it.
+
+   **Pylon styles:** tubular steel (cheapest), lattice truss (×1.5 cost, up to 1.6× taller) and portal frame (×1.3 cost, straddles wide ropes). Choose a style for the whole lift in its panel, or for a single pylon in the pylon editor. Each pylon carries sheave trains tilted to the rope angle, with more wheels where the rope bends more, and hold-down wheels above the rope where it bends upward over a pylon in a dip. Stations have concrete plinths, glass walls, gabled roofs in the lift's accent colour, a visible bullwheel and a boarding deck, and the bottom station has a machine house. Chairs and cabins can be painted in nine colours.
 
    Click a lift in View mode to rename it, change its line speed and how many carriers run, open or close it, upgrade it to another type (half the old lift's value is credited), or remove it.
 2. **Ski run**: drag from a lift top down the slope, or click point by point. The line is smoothed into a curve. While you draw, the terrain shows a slope map and the preview is coloured by local steepness, with the steepest section marked. End on a lift bottom or a lodge, or press Enter, to finish.
