@@ -106,7 +106,7 @@ const LIFT_TYPES = {
 const LIFT_ALIASES = { chair: 'chair4' };   // saves from before the lift overhaul
 const CS = 3.5;                             // carriers drawn 3.5x real size so they read at map scale
 const MAX_BEND = 4.5;                       // max rope deflection per sheave, degrees (inspection rule)
-const WHEEL_R = 0.42 * CS, WHEEL_SP = WHEEL_R * 2.15;
+const WHEEL_R = 0.3 * CS, WHEEL_SP = WHEEL_R * 2.2;
 const MAX_LEAN = 30, MAX_LINK_GAP = 45, MAX_LINKED = 4;
 const SHEAVE_MODES = { auto: 'Automatic', support: 'Bottom (support)', hold: 'Top (hold-down)', both: 'Top and bottom' };
 const LIFT_COLORS = [0xc0392b, 0xe67e22, 0xffc81e, 0x2e9e5b, 0x3d6fb6, 0x5b2d82, 0xf0f0f0, 0x9aa3ad, 0x2b2f35];
@@ -586,7 +586,9 @@ const Lifts = {
   // walkway beside a sheave train: follows the train's curve just below the wheels, outside the bogies
   _walkway(parts, FL, l, t, wide = false) {
     const T = l.T, ext = Math.max(0, ...(T.ropes || [0]).map(Math.abs));
-    const x = T.gauge + ext + (wide ? 2.4 : 2.0), drop = t.mode === 'hold' ? 1.6 : 2 * t.r + (wide ? 0.95 : 0.55);
+    // walkways run on the inner side of the trains (outer side for twin-leg platforms)
+    const x = wide ? T.gauge + ext + 2.4 : Math.max(1.6, T.gauge - ext - 2.2), drop = t.mode === 'hold' ? 1.6 : 2 * t.r + (wide ? 0.95 : 0.55);
+    const rail = wide ? 1 : -1;                                                               // railing on the side away from the wheels
     const yAt = (s) => t.yAt(s) - drop;
     t.walk = { x, yAt };
     const s0 = t.s0 - 2, s1 = t.s1 + 2, n = Math.max(2, Math.ceil((s1 - s0) / 2.5));
@@ -596,8 +598,8 @@ const Lifts = {
       for (let k = 0; k <= n; k++) {
         const s = s0 + ((s1 - s0) * k) / n, y = yAt(s), pt = [X, y, s];
         if (prev) this._plank(parts, 'grate', FL, prev, pt, wide ? 2.4 : 1.4, 0.14);
-        const post = [X + sgn * 0.68, y + 1.1, s];
-        if (k % 1 === 0) this._strut(parts, 'galv', FL, [X + sgn * 0.68, y, s], post, 0.09);       // railing post
+        const rx = X + sgn * rail * (wide ? 1.15 : 0.68), post = [rx, y + 1.1, s];
+        this._strut(parts, 'galv', FL, [rx, y, s], post, 0.09);                                    // railing post
         if (prevPost) {
           this._strut(parts, 'galv', FL, prevPost, post, 0.1);                                      // handrail
           this._strut(parts, 'galv', FL, [prevPost[0], prevPost[1] - 0.55, prevPost[2]], [post[0], post[1] - 0.55, post[2]], 0.06);  // knee rail
@@ -624,8 +626,8 @@ const Lifts = {
       for (const sgn of surface ? [-1] : [1, -1]) for (const o of T.ropes || [0]) {
         const x = sgn * (T.gauge + o), bx = x + sgn * 0.55;
         for (const [cz, cy] of centres) {
-          const g = new THREE.CylinderGeometry(t.r, t.r, 0.5, 16); g.rotateZ(Math.PI / 2); g.translate(x, cy, cz); parts.add('rubber', g, FL);
-          const hub = new THREE.CylinderGeometry(t.r * 0.35, t.r * 0.35, 0.62, 8); hub.rotateZ(Math.PI / 2); hub.translate(x, cy, cz); parts.add('steel', hub, FL);
+          const g = new THREE.CylinderGeometry(t.r, t.r, 0.36, 16); g.rotateZ(Math.PI / 2); g.translate(x, cy, cz); parts.add('rubber', g, FL);
+          const hub = new THREE.CylinderGeometry(t.r * 0.35, t.r * 0.35, 0.46, 8); hub.rotateZ(Math.PI / 2); hub.translate(x, cy, cz); parts.add('steel', hub, FL);
         }
         for (let w = 0; w + 1 < centres.length; w += 2) this._strut(parts, 'steel', FL, [bx, centres[w][1], centres[w][0]], [bx, centres[w + 1][1], centres[w + 1][0]], 0.45);
         for (const [z, y] of bal) this._strut(parts, 'steel', FL, [bx, y - off, z], [bx, y, z], 0.35);
@@ -667,34 +669,29 @@ const Lifts = {
     const ropeTop = p.y - gy;                                       // rope height above this pylon's foot
     // MGD-style head on frame M at local height Hh: box crossarm, cap, and the trapezoidal frame that
     // stands on the crossarm ends and arches over the sheave trains (for lifting the rope off the wheels)
+    // Head (after the reference photo of a modern gondola pylon): crossarm out to the sheave trains,
+    // and above it a lifting gantry: a top beam whose ends sit right over the ropes, carried by struts
+    // that flare outwards from the crossarm, two thin posts and knee brackets under the beam ends.
     const head = (M, Hh, key = 'galv') => {
-      this._box(parts, key, M, reach * 2 + 1.5, 1.5, 1.4, 0, Hh + 0.2, 0);                     // box crossarm
-      this._cyl(parts, key, M, 1.1, 1.1, 2.2, 0, Hh - 0.9, 0, 16);                              // head cap
-      // trapezoidal lattice truss over the ropes: bottom chord on the crossarm, sides rising from the
-      // crossarm ends (and past the walkways) to a shorter top chord, braced with verticals and diagonals
-      const clear = t.mode === 'hold' ? Hh + 1 : t.mode === 'both' ? ropeTop + 2 * t.r + 1.2 : ropeTop + 1.3;
-      const xb = reach + 1.6, yb = Hh + 0.95, yp = Math.max(yb + 0.8, clear), xt = Math.max(1.6, reach * 0.45);
-      const yt = yp + Math.max(2.4, (xb - xt) * 0.55), D = 0.75;
-      const side = (u) => [xb + (xt - xb) * u, yp + (yt - yp) * u];                     // point up the slanted side
-      for (const zz of [-D, D]) {
-        this._strut(parts, key, M, [-xb, yb, zz], [xb, yb, zz], 0.4);                     // bottom chord
-        this._strut(parts, key, M, [-xt, yt, zz], [xt, yt, zz], 0.45);                    // top chord
-        for (const sx of [-1, 1]) {
-          this._strut(parts, key, M, [sx * xb, yb, zz], [sx * xb, yp, zz], 0.42);          // end posts beside the walkways
-          this._strut(parts, key, M, [sx * xb, yp, zz], [sx * xt, yt, zz], 0.42);          // slanted sides
-          const [mx, my] = side(0.5);
-          this._strut(parts, key, M, [sx * mx, my, zz], [sx * mx, yb, zz], 0.24);          // vertical
-          this._strut(parts, key, M, [sx * xb, yb, zz], [sx * mx, my, zz], 0.18);          // diagonals
-          this._strut(parts, key, M, [sx * mx, yb, zz], [sx * xt, yt, zz], 0.18);
-          this._strut(parts, key, M, [sx * xt, yt, zz], [sx * xt, yb, zz], 0.24);
-        }
-        this._strut(parts, key, M, [-xt, yb, zz], [0, yt, zz], 0.18);
-        this._strut(parts, key, M, [xt, yb, zz], [0, yt, zz], 0.18);
+      const xr = T.gauge + ext, yA = Hh + 0.8;                                                 // rope x, crossarm top
+      this._box(parts, key, M, (xr + 0.4) * 2, 1.2, 1.3, 0, Hh + 0.2, 0);                     // crossarm
+      this._cyl(parts, key, M, 1.1, 1.1, 2.2, 0, Hh - 0.9, 0, 16);                             // head cap on the tube
+      const clear = t.mode === 'hold' ? Hh + 1.5 : (t.mode === 'both' ? ropeTop + 2 * t.r : ropeTop) + 2.4;
+      const yT = Math.max(yA + xr * 0.75, clear), xT = xr + 0.7;
+      this._box(parts, key, M, xT * 2, 0.75, 0.75, 0, yT, 0);                                  // top beam over the ropes
+      for (const sx of [-1, 1]) {
+        this._strut(parts, key, M, [sx * xr * 0.6, yA, 0], [sx * (xr - 0.15), yT - 0.38, 0], 0.55);   // flaring strut
+        this._strut(parts, key, M, [sx * (xr - 1.6), yT - 0.38, 0], [sx * (xr - 0.15), yT - 1.9, 0], 0.32);   // knee brace
+        this._strut(parts, key, M, [sx * xr * 0.3, yA, 0], [sx * xr * 0.3, yT - 0.38, 0], 0.28); // thin post
+        this._box(parts, key, M, 0.5, 0.9, 0.7, sx * (xT - 0.3), yT - 0.8, 0);                   // hoist bracket at the beam end
+        // railing hoops on the crossarm
+        for (const x of [xr * 0.38, xr * 0.85]) this._strut(parts, key, M, [sx * x, yA, -0.5], [sx * x, yA + 1.2, -0.5], 0.08);
+        this._strut(parts, key, M, [sx * xr * 0.38, yA + 1.2, -0.5], [sx * xr * 0.85, yA + 1.2, -0.5], 0.08);
       }
-      for (const x of [-xt, 0, xt]) this._strut(parts, key, M, [x, yt, -D], [x, yt, D], 0.3);   // ties between the two planes
-      for (const sx of [-1, 1]) this._strut(parts, key, M, [sx * xt, yt, -D], [0, yt, D], 0.14);
-      const eye = new THREE.TorusGeometry(0.35, 0.09, 6, 12); eye.translate(0, yt + 0.55, 0); parts.add(key, eye, M);   // lifting eye
-      this._box(parts, 'accent', M, 0.6, 0.45, 0.6, xt, yt + 0.45, 0);                                     // obstruction light
+      // ladder carries on from the tube up to the top beam
+      for (const lx of [-0.35, 0.35]) this._box(parts, key, M, 0.08, yT - yA, 0.08, lx, (yA + yT) / 2, 0.75);
+      for (let y = yA + 0.4; y < yT; y += 0.9) this._box(parts, key, M, 0.7, 0.06, 0.06, 0, y, 0.75);
+      this._box(parts, 'accent', M, 0.6, 0.45, 0.6, 0, yT + 0.6, 0);                                     // obstruction light
     };
     const ladder = (M, rb, y0, y1) => {
       const lz = rb + 0.45;
@@ -753,9 +750,9 @@ const Lifts = {
       for (const sgn of surface ? [-1] : [1, -1]) {
         const w = t.walk;
         if (!w) continue;
-        const wy = w.yAt(p.s), wx = sgn * (w.x - 0.75);
-        this._strut(parts, 'galv', FL, [sgn * (reach + 0.4), armAbs, p.s], [wx, wy - 0.1, p.s], 0.32);
-        this._strut(parts, 'galv', FL, [sgn * (reach + 0.4), armAbs - 1.4, p.s], [wx, wy - 0.1, p.s], 0.22);
+        const wy = w.yAt(p.s), wx = sgn * w.x;
+        this._strut(parts, 'galv', FL, [wx, armAbs - 0.4, p.s], [wx, wy - 0.1, p.s], 0.3);            // hanger from the crossarm
+        this._strut(parts, 'galv', FL, [sgn * (w.x * 0.45), armAbs - 0.4, p.s], [wx, wy - 0.1, p.s], 0.2);
       }
     }
     if (p.ypair || style === 'mgd') {
@@ -947,7 +944,7 @@ const Lifts = {
       g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(line), M.cable));
       const path = new THREE.CurvePath();
       for (let k = 0; k < line.length - 1; k++) if (line[k].distanceToSquared(line[k + 1]) > 0.01) path.add(new THREE.LineCurve3(line[k], line[k + 1]));
-      if (path.curves.length) ropeParts.add('rope', new THREE.TubeGeometry(path, path.curves.length, 0.22, 5, false));
+      if (path.curves.length) ropeParts.add('rope', new THREE.TubeGeometry(path, path.curves.length, 0.15, 5, false));
     }
     ropeParts.build(g, (k) => M.ropeMesh);
     const up = this.ropeLine(P, a, 1, T.gauge), down = this.ropeLine(P, a, -1, T.gauge).reverse();
