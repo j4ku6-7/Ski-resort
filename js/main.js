@@ -48,7 +48,7 @@ const UI = {
 
 const App = {
   tool: 'select', draft: null, hover: null, preview: null, liftType: 'chair4', panelLift: null,
-  grading: false, holdAngle: false, gradeDeg: 13,
+  grading: false, holdAngle: false, gradeDeg: 13, manualPylons: false, edit: null,
 
   init() {
     const menu = $('#resorts');
@@ -141,6 +141,7 @@ const App = {
 
     this.bindInput();
     this.bindLiftPanel();
+    this.bindPylonPanel();
     this.bindRunOptions();
     let contours = false;
     try { contours = localStorage.getItem('skiresort.contours') === '1'; } catch { /* ignore */ }
@@ -168,7 +169,9 @@ const App = {
     el.addEventListener('pointerdown', (e) => {
       down = { x: e.clientX, y: e.clientY, b: e.button, moved: false };
       this.mouse = { x: e.clientX, y: e.clientY }; this.updateHover();
-      if (e.button === 0 && (this.tool === 'run' || this.tool === 'cut') && this.hover) {
+      if (e.button === 0 && this.tool === 'pylons' && this.edit && this.edit.hover != null) {
+        this.edit.sel = this.edit.hover; this.stroke = { pylon: this.edit.hover }; this.controls.enabled = false; this.drawPylonOverlay();
+      } else if (e.button === 0 && (this.tool === 'run' || this.tool === 'cut') && this.hover) {
         this.stroke = { cut: 0, last: null }; this.controls.enabled = false;
       }
     }, true);
@@ -202,7 +205,17 @@ const App = {
     $('#grade-it').onclick = () => { this.grading = true; this.syncRunOptions(); };
 
     addEventListener('keydown', (e) => {
-      if (e.target.tagName === 'INPUT') return;
+      if (e.target.tagName === 'INPUT' && e.target.type !== 'range' && e.target.type !== 'checkbox') return;
+      if (this.tool === 'pylons' && this.edit) {
+        const ed = this.edit, T = ed.l.T;
+        if ((e.key === '+' || e.key === '=' || e.key === '-') && ed.sel != null) {
+          const t = ed.towers[ed.sel], step = (e.shiftKey ? 5 : 1) * (e.key === '-' ? -1 : 1);
+          t.h = clamp(t.h + step, this.minPylon(T), T.maxTowerH); this.applyPylons(); e.preventDefault(); return;
+        }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && ed.sel != null) { this.removePylon(); e.preventDefault(); return; }
+        if (e.key === 'Escape') { ed.sel = null; this.applyPylons(); return; }
+        if (e.key === 'Enter') { this.finishPylons(); return; }
+      }
       const keys = { '1': 'select', '2': 'lift', '3': 'run', '4': 'cut', '5': 'bulldoze' };
       if (keys[e.key]) this.setTool(keys[e.key]);
       else if (e.key === '[' || e.key === ']') {
@@ -218,10 +231,12 @@ const App = {
   },
 
   setTool(t) {
+    if (this.edit && t !== 'pylons') this.cancelPylons();
     this.tool = t;
     this.draft = t === 'lift' ? { a: null } : t === 'run' ? { pts: [] } : null;
     $('#lift-types').hidden = t !== 'lift';
     $('#run-options').hidden = t !== 'run';
+    $('#pylon-panel').hidden = t !== 'pylons';
     for (const b of document.querySelectorAll('[data-tool]')) b.classList.toggle('active', b.dataset.tool === t);
     const drawing = t === 'run' || t === 'cut';
     Terrain.showSlopeMap(t === 'run');
@@ -282,6 +297,7 @@ const App = {
       if (junction) this.joinRing.position.set(junction.x, junction.y + 3, junction.z);
       if (this.tool === 'select' || this.tool === 'bulldoze') this.showTooltip(Net.edgeNear(hit.x, hit.z));
     }
+    if (this.tool === 'pylons' && this.edit) this.hoverPylons(hit);
     this.brushRing.visible = !!hit && this.tool === 'cut';
     if (this.brushRing.visible) this.brushRing.position.set(hit.x, hit.y + 4, hit.z);
     this.updatePreview();
@@ -291,7 +307,7 @@ const App = {
     const tt = $('#tooltip');
     if (!e || !this.mouse) return;
     if (e.kind === 'lift') {
-      tt.innerHTML = `<b>${e.name} · ${e.T.name}</b>${e.opt.open ? '' : ' <span class="neg">CLOSED</span>'}<br>
+      tt.innerHTML = `<b>${e.name} · ${e.T.name}</b>${e.opt.open ? '' : ' <span class="neg">CLOSED</span>'}${e.issues && e.issues.length ? ' <span class="neg">⚠ failed inspection</span>' : ''}<br>
         ${fmt(e.len)} m long · climbs ${fmt(e.vert)} m · ${e.towers} towers<br>
         ${fmt(Lifts.capacity(e))} skiers/h · ride ${(Lifts.rideTime(e) / 60).toFixed(1)} min<br>
         queue ${e.queue.length}${e.queue.length ? ` · wait ~${Math.round(Lifts.waitTime(e) / 60)} min` : ''}` +
@@ -320,6 +336,12 @@ const App = {
     $('#grade-it').hidden = true;
     if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom · click a lift for its options.';
     else if (t === 'bulldoze') hint = 'Click a lift or run to remove it (50% refund).';
+    else if (t === 'pylons' && this.edit) {
+      const e = this.edit;
+      hint = e.hover != null ? 'Drag to move this pylon along the line · click to select it'
+        : e.ghost != null ? `Click to add a pylon here (${money(Lifts.towerPrice(e.l.T, e.l.T.towerH))})`
+        : 'Point at the lift line to add a pylon · drag pylons to move them · <b>+ / −</b> height (Shift = 5 m) · <b>Del</b> removes · <b>Enter</b> done';
+    }
     else if (t === 'cut') {
       const n = h ? Terrain.treesNear([h], this.brush).length : 0;
       hint = `Click or drag to fell trees · ${n} under the brush · <b>${money(n * TREE_COST)}</b> · <span class="dim">[ ] brush size · right-drag to rotate</span>` +
@@ -329,9 +351,9 @@ const App = {
       const T = LIFT_TYPES[this.liftType];
       if (!d.a) hint = `<b>${T.name}</b>: click the bottom station, snapping to a lodge or run end. Pick another type on the right.`;
       else if (h) {
-        const plan = Net.liftPlan(this.liftType, d.a, h);
+        const plan = Net.liftPlan(this.liftType, d.a, h, false, this.manualPylons);
         const pa = plan.a, pb = plan.b;
-        const { pts } = Lifts.previewGeometry(T, pa, Net.pointY(pa), pb, Net.pointY(pb));
+        const { pts } = Lifts.previewGeometry(T, pa, Net.pointY(pa), pb, Net.pointY(pb), plan.manual ? [] : null);
         this.liftLine.geometry.dispose();
         this.liftLine.geometry = new THREE.BufferGeometry();
         this.liftLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
@@ -378,18 +400,28 @@ const App = {
     if (t === 'bulldoze') {
       const e = h && Net.edgeNear(h.x, h.z);
       if (e) { if (e === this.panelLift) this.closeLiftPanel(); Net.remove(e); UI.toast(`Removed ${e.name}`); Save.write(); }
+    } else if (t === 'pylons' && this.edit) {
+      const e = this.edit;
+      if (e.hover != null) e.sel = e.hover;
+      else if (e.ghost != null) {
+        e.towers.push({ s: e.ghost, h: e.l.T.towerH });
+        e.sel = e.towers.length - 1; e.hover = e.sel; e.ghost = null;
+      }
+      this.applyPylons();
+      return;
     } else if (t === 'select') {
       const e = h && Net.edgeNear(h.x, h.z);
       if (e && e.kind === 'lift') this.openLiftPanel(e); else this.closeLiftPanel();
     } else if (t === 'lift' && h) {
       if (!d.a) d.a = { ...h };
       else {
-        const plan = Net.liftPlan(this.liftType, d.a, h);
+        const plan = Net.liftPlan(this.liftType, d.a, h, false, this.manualPylons);
         if (!plan.ok) return UI.toast(plan.msg);
         const l = Net.buildLift(plan);
         UI.toast(`${l.name} ${l.T.name} built for ${money(plan.cost)}`);
         Save.write();
         this.draft = { a: null };
+        if (plan.manual) { l.awaitInspection = true; return this.openPylons(l); }
       }
     } else if (t === 'cut' && h) {
       const n = Game.cutAt(h.x, h.z, this.brush);
@@ -497,9 +529,156 @@ const App = {
     sync();
   },
 
+  // ---------- pylon editor ----------
+  minPylon(T) { return Math.max(4, Math.round(T.towerH * 0.5)); },
+
+  openPylons(l) {
+    if (l.T.kind === 'belt') return UI.toast('A magic carpet has no pylons.');
+    const T = l.T, start = (l.customTowers || Lifts.autoTowers(T, l.a, l.a.y, l.b, l.b.y)).map((t) => ({ ...t }));
+    this.edit = {
+      l, origCustom: l.customTowers ? l.customTowers.map((t) => ({ ...t })) : null,
+      origValue: Lifts.towersValue(T, start), towers: start, sel: null, hover: null, ghost: null,
+      wasOpen: l.opt.open || !!l.awaitInspection,
+    };
+    this.closeLiftPanel();
+    this.setTool('pylons');
+    this.applyPylons();
+  },
+
+  applyPylons() {
+    const e = this.edit;
+    Net.setTowers(e.l, e.towers);
+    this.drawPylonOverlay();
+    this.refreshPylonPanel();
+    this.updatePreview();
+  },
+
+  hoverPylons(hit) {
+    const e = this.edit, l = e.l, d = l.dir, hl = Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z);
+    let hov = null, ghost = null;
+    this.editS = null;
+    if (hit) {
+      const rx = hit.x - l.a.x, rz = hit.z - l.a.z, s = rx * d.ux + rz * d.uz, perp = Math.abs(rx * d.px + rz * d.pz);
+      this.editS = s;
+      if (perp < 55 && s > 12 && s < hl - 12) {
+        let bd = 20;
+        e.towers.forEach((t, i) => { const dd = Math.abs(t.s - s); if (dd < bd) { bd = dd; hov = i; } });
+        if (hov === null) ghost = s;
+      }
+    }
+    if (this.stroke && this.stroke.pylon != null) return;
+    if (hov !== e.hover || (ghost === null) !== (e.ghost === null) || (ghost !== null && Math.abs(ghost - (e.ghost || 0)) > 2)) {
+      e.hover = hov; e.ghost = ghost; this.drawPylonOverlay();
+    }
+  },
+
+  drawPylonOverlay() {
+    if (this.editGroup) {
+      this.scene.remove(this.editGroup);
+      this.editGroup.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+      this.editGroup = null;
+    }
+    const e = this.edit;
+    if (!e) return;
+    const l = e.l, T = l.T, P = l.profileP, g = new THREE.Group();
+    const { samples } = Lifts.inspect(T, P, l.a);
+    const col = { ok: [0.24, 1, 0.6], low: [1, 0.6, 0.1], hit: [1, 0.2, 0.15], high: [1, 0.85, 0.2] };
+    const pos = [], cc = [];
+    for (let i = 0; i < samples.length - 1; i++) {
+      const p = samples[i], q = samples[i + 1], c = col[p.st === 'ok' ? q.st : p.st];
+      pos.push(p.x, p.y + 1, p.z, q.x, q.y + 1, q.z); cc.push(...c, ...c);
+    }
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    lg.setAttribute('color', new THREE.Float32BufferAttribute(cc, 3));
+    const rope = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false }));
+    rope.renderOrder = 12; g.add(rope);
+    const order = e.towers.map((t, i) => i).sort((a, b) => e.towers[a].s - e.towers[b].s);
+    for (const i of e.towers.keys()) {
+      const t = e.towers[i], x = l.a.x + l.dir.ux * t.s, z = l.a.z + l.dir.uz * t.s, gy = Terrain.height(x, z);
+      const m = new THREE.Mesh(new THREE.SphereGeometry(T.gauge + 3, 14, 10), new THREE.MeshBasicMaterial({
+        color: i === e.sel ? 0x35e0ff : i === e.hover ? 0xffcf5a : 0xffffff, depthTest: false, transparent: true, opacity: 0.85 }));
+      m.position.set(x, gy + t.h + 2, z); m.renderOrder = 13; g.add(m);
+    }
+    if (e.ghost != null) {
+      const x = l.a.x + l.dir.ux * e.ghost, z = l.a.z + l.dir.uz * e.ghost, gy = Terrain.height(x, z);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.4, T.towerH, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthTest: false }));
+      m.position.set(x, gy + T.towerH / 2, z); m.renderOrder = 13; g.add(m);
+    }
+    this.editGroup = g; this.scene.add(g);
+    this.pylonOrder = order;
+  },
+
+  refreshPylonPanel() {
+    const e = this.edit, l = e.l, T = l.T;
+    $('#pp-title').textContent = `${l.name} · ${T.name} pylons`;
+    $('#pp-count').textContent = e.towers.length;
+    const diff = Lifts.towersValue(T, e.towers) - e.origValue;
+    $('#pp-cost').innerHTML = Math.abs(diff) < 1 ? '—' : diff > 0 ? `<span class="neg">${money(-diff)}</span>` : `<span class="pos">refund ${money(-diff / 2)}</span>`;
+    $('#pp-issues').innerHTML = l.issues.length
+      ? l.issues.map((i) => `<p class="danger">⚠ ${i}</p>`).join('') + '<p class="dim small">The lift stays closed until it passes inspection.</p>'
+      : '<p class="ok">✓ Passes the safety inspection</p>';
+    const sel = e.sel != null ? e.towers[e.sel] : null;
+    $('#pp-sel').hidden = !sel;
+    if (sel) {
+      const rank = this.pylonOrder ? this.pylonOrder.indexOf(e.sel) + 1 : e.sel + 1;
+      $('#pp-sel-name').textContent = `Pylon ${rank} · ${Math.round(sel.s)} m along the line`;
+      const r = $('#pp-h'); r.min = this.minPylon(T); r.max = T.maxTowerH; r.value = sel.h;
+      $('#pp-h-v').textContent = `${Math.round(sel.h)} m · ${money(Lifts.towerPrice(T, sel.h))}`;
+    }
+  },
+
+  removePylon() {
+    const e = this.edit;
+    if (e.sel == null) return;
+    e.towers.splice(e.sel, 1); e.sel = null; e.hover = null;
+    this.applyPylons();
+  },
+
+  finishPylons() {
+    const e = this.edit, l = e.l, T = l.T;
+    const diff = Lifts.towersValue(T, e.towers) - e.origValue;
+    if (diff > 0 && diff > Game.money) return UI.toast(`Not enough money for these pylons (${money(diff)}).`);
+    if (diff > 0) Game.spend(diff); else Game.money -= diff / 2;
+    this.edit = null;
+    this.drawPylonOverlay();
+    if (l.issues.length) UI.toast(`${l.name} failed the safety inspection and stays closed: ${l.issues[0]}.`);
+    else {
+      if (e.wasOpen) Net.setLiftOpen(l, true);
+      l.awaitInspection = false;
+      UI.toast(`${l.name} passed the safety inspection${e.wasOpen ? ' and is open' : ''}.`);
+    }
+    Save.write();
+    this.setTool('select');
+    this.openLiftPanel(l);
+  },
+
+  cancelPylons() {
+    const e = this.edit;
+    if (!e) return;
+    this.edit = null;
+    const l = e.l;
+    l.customTowers = e.origCustom;
+    Net.group.remove(l.vis); Lifts.dispose(l.vis); Lifts.build(l); Net.group.add(l.vis);
+    if (e.wasOpen && !l.awaitInspection) Net.setLiftOpen(l, true);
+    this.drawPylonOverlay();
+    $('#pylon-panel').hidden = true;
+  },
+
+  bindPylonPanel() {
+    $('#pp-h').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].h = +ev.target.value; this.applyPylons(); } };
+    $('#pp-del').onclick = () => this.removePylon();
+    $('#pp-auto').onclick = () => { const e = this.edit, l = e.l; e.towers = Lifts.autoTowers(l.T, l.a, l.a.y, l.b, l.b.y); e.sel = null; this.applyPylons(); };
+    $('#pp-cancel').onclick = () => { this.cancelPylons(); this.setTool('select'); };
+    $('#pp-done').onclick = () => this.finishPylons();
+    $('#lp-pylons').onclick = () => { const l = this.panelLift; if (l) this.openPylons(l); };
+  },
+
   buildLiftPicker() {
     const box = $('#lift-types');
-    box.innerHTML = '<b class="pk-title">Lift type</b>';
+    box.innerHTML = `<b class="pk-title">Lift type</b>
+      <label class="toggle"><input type="checkbox" id="manual-pylons"${this.manualPylons ? ' checked' : ''}> Place pylons myself</label>`;
+    box.querySelector('#manual-pylons').onchange = (ev) => { this.manualPylons = ev.target.checked; this.updateHover(); };
     for (const [key, T] of Object.entries(LIFT_TYPES)) {
       const cap = T.kind === 'tram' ? 'about 400' : fmt((T.seats / T.interval) * 3600);
       const b = document.createElement('button');
@@ -538,7 +717,7 @@ const App = {
     $('#lp-density-v').textContent = `${Math.round(l.opt.density * 100)}%`;
     $('#lp-stats').innerHTML = `
       <div class="row"><span>Length / climb</span><b>${fmt(l.len)} m / ${fmt(l.vert)} m</b></div>
-      <div class="row"><span>Towers</span><b>${l.towers}</b></div>
+      <div class="row"><span>Pylons</span><b>${l.towers}${l.customTowers ? ' <small>(placed by you)</small>' : ''}</b></div>
       <div class="row"><span>Capacity</span><b>${fmt(Lifts.capacity(l))} skiers/h</b></div>
       <div class="row"><span>Ride time</span><b>${(Lifts.rideTime(l) / 60).toFixed(1)} min</b></div>
       <div class="row"><span>Queue</span><b>${l.queue.length}${l.queue.length ? ` · ~${Math.round(Lifts.waitTime(l) / 60)} min` : ''}</b></div>
@@ -549,6 +728,8 @@ const App = {
     $('#lp-up-go').disabled = !plan.ok;
     $('#lp-up-msg').textContent = plan.ok ? '' : plan.msg;
     $('#lp-remove').textContent = `Remove lift (refund ${money(l.cost / 2)})`;
+    $('#lp-inspect').innerHTML = l.issues && l.issues.length ? `<p class="danger">⚠ Failed safety inspection: ${l.issues.join('; ')}</p>` : '';
+    $('#lp-pylons').hidden = l.T.kind === 'belt';
   },
 
   bindLiftPanel() {
@@ -559,7 +740,10 @@ const App = {
     $('#lp-speed').oninput = (e) => { L().opt.speed = e.target.value / 100; this.refreshLiftPanel(); };
     $('#lp-density').oninput = (e) => { L().opt.density = e.target.value / 100; this.refreshLiftPanel(); };
     for (const id of ['#lp-speed', '#lp-density']) $(id).onchange = () => Save.write();
-    $('#lp-open').onchange = (e) => { Net.setLiftOpen(L(), e.target.checked); Save.write(); this.refreshLiftPanel(); };
+    $('#lp-open').onchange = (e) => {
+      if (!Net.setLiftOpen(L(), e.target.checked)) { e.target.checked = false; UI.toast(`${L().name} failed the safety inspection. Fix its pylons first.`); }
+      Save.write(); this.refreshLiftPanel();
+    };
     $('#lp-up').onchange = () => this.refreshLiftPanel();
     $('#lp-up-go').onclick = () => {
       const l = L(), from = l.T.name, plan = Net.upgradeLift(l, $('#lp-up').value);
@@ -579,6 +763,11 @@ const App = {
 
   strokeMove() {
     const h = this.hover, st = this.stroke;
+    if (st.pylon != null) {
+      const e = this.edit, hl = Math.hypot(e.l.b.x - e.l.a.x, e.l.b.z - e.l.a.z);
+      if (this.editS != null) { e.towers[st.pylon].s = clamp(this.editS, 12, hl - 12); this.applyPylons(); }
+      return;
+    }
     if (!h) return;
     if (this.tool === 'cut') {
       if (st.last && Math.hypot(st.last.x - h.x, st.last.z - h.z) < this.brush * 0.4) return;
@@ -594,6 +783,7 @@ const App = {
   },
 
   strokeEnd() {
+    if (this.stroke.pylon != null) return;
     if (this.tool === 'cut') {
       if (this.stroke.cut) { UI.toast(`Felled ${this.stroke.cut} trees for ${money(this.stroke.cut * TREE_COST)}`); Save.write(); }
       return;

@@ -12,6 +12,7 @@ const LIFT_TYPES = {
     desc: 'A conveyor belt for the beginner area. Short and gentle only.',
   },
   tbar: {
+    maxSpan: 150, maxTowerH: 14,
     name: 'T-bar', icon: '⊤', kind: 'surface', model: 'tbar',
     speed: 3, interval: 4.5, seats: 2, minLen: 100, maxLen: 1500, minVert: 10, maxGrade: 0.6,
     baseCost: 30000, perM: 45, towerCost: 3000, opBase: 1200, opPerM: 0.8, cold: 1.2,
@@ -19,6 +20,7 @@ const LIFT_TYPES = {
     desc: 'A cheap surface lift that drags skiers uphill. Beginners hate it, and slopes are limited to 60%.',
   },
   chair2: {
+    maxSpan: 300, maxTowerH: 40,
     name: 'Double chair', icon: '⑂', kind: 'aerial', model: 'chair2',
     speed: 2.3, interval: 5.5, seats: 2, minLen: 150, maxLen: 2200, minVert: 20,
     baseCost: 40000, perM: 45, towerCost: 6000, opBase: 1500, opPerM: 1.0, cold: 1,
@@ -26,6 +28,7 @@ const LIFT_TYPES = {
     desc: 'Fixed-grip double chair. Cheap but slow; long rides get cold.',
   },
   chair4: {
+    maxSpan: 350, maxTowerH: 45,
     name: 'Detachable quad', icon: '⑃', kind: 'aerial', model: 'chair4',
     speed: 5, interval: 6, seats: 4, minLen: 150, maxLen: 3000, minVert: 20,
     baseCost: 120000, perM: 70, towerCost: 9000, opBase: 3000, opPerM: 1.6, cold: 1,
@@ -33,6 +36,7 @@ const LIFT_TYPES = {
     desc: 'High-speed chairs that slow down in the stations. The workhorse lift.',
   },
   chair6: {
+    maxSpan: 350, maxTowerH: 45,
     name: '6-seat bubble chair', icon: '⑆', kind: 'aerial', model: 'chair6', bubble: true,
     speed: 5, interval: 5.4, seats: 6, minLen: 150, maxLen: 3200, minVert: 20,
     baseCost: 200000, perM: 90, towerCost: 12000, opBase: 4500, opPerM: 2, cold: 0.3,
@@ -40,6 +44,7 @@ const LIFT_TYPES = {
     desc: 'High capacity, with weather bubbles and heated seats.',
   },
   gondola: {
+    maxSpan: 600, maxTowerH: 65,
     name: '8-person gondola', icon: '▣', kind: 'aerial', model: 'gondola',
     speed: 6, interval: 10, seats: 8, minLen: 300, maxLen: 6000, minVert: 30,
     baseCost: 250000, perM: 120, towerCost: 15000, opBase: 6000, opPerM: 2.5, cold: 0,
@@ -47,6 +52,7 @@ const LIFT_TYPES = {
     desc: 'Enclosed cabins for long lifts from the valley. Warm and comfortable.',
   },
   tram: {
+    maxSpan: 3000, maxTowerH: 120,
     name: 'Aerial tramway', icon: '⛫', kind: 'tram', model: 'tram',
     speed: 10, seats: 80, dwell: 90, minLen: 400, maxLen: 5000, minVert: 100,
     baseCost: 600000, perM: 250, towerCost: 90000, opBase: 9000, opPerM: 3, cold: 0,
@@ -75,13 +81,35 @@ const Lifts = {
 
   // Cable profile along the lift line: towers wherever the rope would touch the snow, or (for chairs)
   // float too high above it. Returns spans with sag, and the tower list.
-  profile(T, a, ya, b, yb) {
+  // Pylon price grows with height (taller = more steel and a bigger foundation).
+  towerPrice(T, h) { return T.towerCost * (0.4 + 0.6 * h / T.towerH); },
+  towersValue(T, towers) { return towers.reduce((v, t) => v + this.towerPrice(T, t.h), 0); },
+
+  // Interior pylons of the automatic layout, as editable {s, h} (s = metres along the line, h = height).
+  autoTowers(T, a, ya, b, yb) {
+    const P = this.profile(T, a, ya, b, yb);
+    return P.prof.slice(1, -1).map((p) => ({ s: p.s, h: Math.round(p.y - P.ground(p.s)) }));
+  },
+
+  // `custom`: null = automatic pylons, or an explicit [{s, h}] list placed by the player.
+  profile(T, a, ya, b, yb, custom = null) {
     const hl = Math.hypot(b.x - a.x, b.z - a.z) || 1, ux = (b.x - a.x) / hl, uz = (b.z - a.z) / hl;
     const ground = (s) => Terrain.height(a.x + ux * s, a.z + uz * s);
     const H = T.towerH;
     const out = { hl, ux, uz, px: -uz, pz: ux, ground, prof: [], towers: 0 };
     if (T.kind === 'belt') { out.prof = [{ s: 0, y: ya }, { s: hl, y: yb }]; return out; }
     const prof = [{ s: 0, y: ya + H }, { s: hl, y: yb + H }];
+    const minClear0 = T.kind === 'surface' ? 2.5 : (T.hang || 1) * CS + 3;
+    const cy0 = (p, q, s) => {
+      const span = q.s - p.s, u = (s - p.s) / span;
+      return p.y + (q.y - p.y) * u - 4 * T.sag * span * u * (1 - u);
+    };
+    if (custom) {
+      for (const t of custom) if (t.s > 0 && t.s < hl) prof.push({ s: t.s, y: ground(t.s) + t.h });
+      prof.sort((p, q) => p.s - q.s);
+      Object.assign(out, { prof, towers: prof.length - 2, cableY: cy0, minClear: minClear0 });
+      return out;
+    }
     const n = Math.floor(hl / T.towerGap);
     for (let k = 1; k <= n; k++) { const s = (hl * k) / (n + 1); prof.push({ s, y: ground(s) + H }); }
     prof.sort((p, q) => p.s - q.s);
@@ -110,6 +138,34 @@ const Lifts = {
     out.towers = prof.length - 2;
     out.cableY = cy;
     return out;
+  },
+
+  // Safety inspection of a rope profile. Returns issues (strings) and coloured rope samples.
+  inspect(T, P, a) {
+    const issues = [], samples = [];
+    if (T.kind === 'belt' || !P.cableY) return { issues, samples };
+    const hang = T.kind === 'surface' ? 0 : (T.hang || 1) * CS;
+    let hitRuns = 0, inHit = false, high = 0, longest = 0;
+    for (let i = 0; i < P.prof.length - 1; i++) {
+      const p = P.prof[i], q = P.prof[i + 1];
+      longest = Math.max(longest, q.s - p.s);
+      for (let s = p.s; s <= q.s; s += 5) {
+        const y = P.cableY(p, q, s), g = P.ground(s), clear = y - hang - g;
+        let st;
+        if (T.kind === 'surface') st = clear < 2 ? 'hit' : clear > T.maxClear ? 'high' : 'ok';
+        else st = clear < 1 ? 'hit' : clear < 3 ? 'low' : y - g > T.maxClear ? 'high' : 'ok';
+        if (st === 'hit' && !inHit) hitRuns++;
+        inHit = st === 'hit';
+        if (st === 'high') high = Math.max(high, y - g);
+        samples.push({ x: a.x + P.ux * s, y, z: a.z + P.uz * s, st });
+      }
+    }
+    if (hitRuns) issues.push(T.kind === 'surface' ? `The rope drags on the snow in ${hitRuns} place${hitRuns > 1 ? 's' : ''}` :
+      `Carriers would hit the snow in ${hitRuns} place${hitRuns > 1 ? 's' : ''}`);
+    if (high) issues.push(T.kind === 'surface' ? 'The rope is too high, so the T-bars can\'t reach the skiers' :
+      `${T.model === 'gondola' ? 'Cabins hang' : 'Chairs hang'} ${Math.round(high)} m above the ground (max ${T.maxClear} m), too high to evacuate`);
+    if (longest > T.maxSpan) issues.push(`A span of ${Math.round(longest)} m is too long (max ${T.maxSpan} m)`);
+    return { issues, samples };
   },
 
   // sampled rope polyline on one side (+1 uphill side, -1 downhill side)
@@ -229,8 +285,10 @@ const Lifts = {
   build(l) {
     this.initAssets();
     const T = l.T, a = l.a, b = l.b, g = new THREE.Group(), M = this.M, G = this.G;
-    const P = this.profile(T, a, a.y, b, b.y);
+    const P = this.profile(T, a, a.y, b, b.y, l.customTowers || null);
     const { hl, ux, uz, px, pz, prof, ground } = P;
+    l.profileP = P;
+    l.issues = l.customTowers ? this.inspect(T, P, a).issues : [];   // automatic layouts are certified
     const rotY = Math.atan2(ux, uz);
     l.towers = P.towers;
     l.quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
@@ -324,8 +382,8 @@ const Lifts = {
   },
 
   // line segments showing the planned rope and towers
-  previewGeometry(T, a, ya, b, yb) {
-    const P = this.profile(T, a, ya, b, yb), pts = [];
+  previewGeometry(T, a, ya, b, yb, custom = null) {
+    const P = this.profile(T, a, ya, b, yb, custom), pts = [];
     const line = T.kind === 'belt' ? this.groundLine(P, a, 0, 0) : this.ropeLine(P, a, 0, 0);
     for (let i = 0; i < line.length - 1; i++) pts.push(line[i].x, line[i].y + 1, line[i].z, line[i + 1].x, line[i + 1].y + 1, line[i + 1].z);
     for (let i = 1; i < P.prof.length - 1; i++) {

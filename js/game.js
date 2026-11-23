@@ -219,13 +219,13 @@ const Net = {
     });
   },
 
-  liftPlan(type, p, q, free = false) {
+  liftPlan(type, p, q, free = false, manual = false) {
     type = LIFT_ALIASES[type] || type;
     const T = LIFT_TYPES[type];
     let a = p, b = q, ya = this.pointY(p), yb = this.pointY(q);
     if (yb < ya) { [a, b] = [b, a]; [ya, yb] = [yb, ya]; }
     const hl = Math.hypot(b.x - a.x, b.z - a.z), vert = yb - ya, len = Math.hypot(hl, vert);
-    const P = Lifts.profile(T, a, ya, b, yb);
+    const P = Lifts.profile(T, a, ya, b, yb, manual && T.kind !== 'belt' ? [] : null);
     const trees = Terrain.treesNear([a, b], T.gauge + 8).length;
     const build = T.baseCost + T.perM * len + P.towers * T.towerCost, cost = build + trees * TREE_COST;
     const grade = T.kind === 'belt' || T.kind === 'surface' ? Lifts.maxGroundGrade(P) : 0;
@@ -237,7 +237,7 @@ const Net = {
     else if (vert < T.minVert) msg = `${aName} needs at least ${T.minVert} m of climb`;
     else if (T.maxGrade && grade > T.maxGrade) msg = `Too steep for ${aName.toLowerCase()} (${Math.round(grade * 100)}% here, max ${Math.round(T.maxGrade * 100)}%)`;
     else if (!free && cost > Game.money) msg = 'Not enough money';
-    return { ok: !msg, msg, a, b, hl, len, vert, cost, build, trees, towers: P.towers, T, type };
+    return { ok: !msg, msg, a, b, hl, len, vert, cost, build, trees, towers: P.towers, T, type, manual: manual && T.kind !== 'belt' };
   },
 
   buildLift(plan, free = false, opt = null, name = null) {
@@ -245,9 +245,11 @@ const Net = {
     const A = this.pointNode(plan.a), B = this.pointNode(plan.b), T = plan.T;
     const l = { kind: 'lift', id: this.seq.lift++, type: plan.type, T, a: A, b: B, len: plan.len, vert: plan.vert,
                 cost: plan.build, queue: [], carriers: [], clock: 0, dist: 0, nextD: 0, next: T.dwell || 0,
-                opt: Object.assign(Lifts.defaultOpt(), opt || {}), ridesToday: 0 };
+                opt: Object.assign(Lifts.defaultOpt(), opt || {}), ridesToday: 0, customTowers: plan.customTowers || (plan.manual ? [] : null) };
+    if (plan.manual) l.opt.open = false;           // opens once the pylons pass inspection
     l.name = name || `L${l.id}`;
     Lifts.build(l);
+    if (l.issues.length) l.opt.open = false;
     this.group.add(l.vis);
     l.label = Labels.add('', 'queue', { x: A.x, y: A.y + Math.max(T.towerH, 6) + 26, z: A.z });
     A.lifts.push(l); B.lifts.push(l); this.lifts.push(l);
@@ -294,7 +296,7 @@ const Net = {
     if (!plan.ok) return plan;
     this.evacuate(l);
     this.group.remove(l.vis); Lifts.dispose(l.vis);
-    l.type = plan.type; l.T = plan.T; l.cost = plan.build; l.len = plan.len;
+    l.type = plan.type; l.T = plan.T; l.cost = plan.build; l.len = plan.len; l.customTowers = null;
     l.clock = l.dist = l.nextD = 0; l.next = l.T.dwell || 0;
     Lifts.build(l);
     this.group.add(l.vis);
@@ -304,11 +306,21 @@ const Net = {
     return plan;
   },
   setLiftOpen(l, open) {
-    if (l.opt.open === open) return;
+    if (open && l.issues && l.issues.length) return false;        // failed safety inspection
+    if (l.opt.open === open) return true;
     l.opt.open = open;
     if (!open) for (const s of l.queue) { s.state = 'atNode'; s.edge = null; }
     if (!open) l.queue.length = 0;
     this.version++;
+    return true;
+  },
+
+  // Replace a lift's pylons (from the pylon editor) and rebuild it.
+  setTowers(l, towers) {
+    l.customTowers = towers.map((t) => ({ s: +t.s.toFixed(1), h: Math.round(t.h) }));
+    this.group.remove(l.vis); Lifts.dispose(l.vis);
+    Lifts.build(l); this.group.add(l.vis);
+    if (l.issues.length) this.setLiftOpen(l, false);
   },
 
   runPlan(points, free = false, gradeDeg = null) {
@@ -745,7 +757,7 @@ const Game = {
       rep: this.rep, debtDays: this.debtDays, stats: this.stats,
       nodes: Net.nodes.filter((n) => !n.base).map((n) => ({ id: n.id, x: n.x, z: n.z })),
       bases: Net.nodes.filter((n) => n.base).map((n) => ({ id: n.id, name: n.name })),
-      lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id, opt: l.opt, name: l.name })),
+      lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id, opt: l.opt, name: l.name, towers: l.customTowers })),
       runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points, gradeDeg: r.gradeDeg, diff: r.diff, maxG: r.maxG, piste: r.piste })),
       trees: Terrain.treeMask(),
       earthworks: this.earthworks,
@@ -762,6 +774,7 @@ const Game = {
     const P = (n) => ({ x: n.x, z: n.z, node: n });
     for (const l of d.lifts) {
       const plan = Net.liftPlan(l.type, P(byId.get(l.a)), P(byId.get(l.b)), true);
+      if (l.towers) plan.customTowers = l.towers;
       Net.buildLift(plan, true, l.opt, l.name);
     }
     for (const r of d.runs) {

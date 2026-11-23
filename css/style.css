@@ -149,3 +149,8 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 #earthworks { border: 0; background: #e8eef5; padding: 6px 10px; border-radius: 7px; }
 #earthworks.active { background: #b5452b; color: #fff; }
 .join { color: #35e0ff; }
+
+/* ---------- pylon editor ---------- */
+#pylon-panel .row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eef1f5; font-size: 13px; }
+.ok { color: #1f8a4c; font-weight: 600; margin: 8px 0; }
+.ghost-btn { width: 100%; margin-top: 6px; border: 1px solid #cfd8e3; background: #fff; border-radius: 8px; padding: 7px; font-weight: 600; }
