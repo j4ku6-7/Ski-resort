@@ -519,6 +519,7 @@ const Net = {
     this.group.add(l.vis);
     if (!l.planned) { Terrain.clearTrees([l.a, l.b], l.T.gauge + 8); Game.spend(plan.cost); }
     this.version++;
+    this.untangleStations();             // a bigger terminal may now overlap a neighbour
     return plan;
   },
   setLiftOpen(l, open) {
