@@ -16,6 +16,12 @@
     <p class="sub">Build lifts and runs on real mountains. Terrain from real elevation data.</p>
     <p class="rules">Keep your guests happy and your books in the black. You lose if you're in debt for 3 days in a row, owe more than €100 000, or your reputation falls below 15%. Progress saves automatically in this browser.</p>
     <div id="resorts"></div>
+    <div class="import">
+      <button id="import-btn" class="import-btn">📂 Import save file</button>
+      <input type="file" id="import-file" accept=".json,application/json" hidden>
+      <span class="dim">Playing on another computer? Load a file you saved with 💾 in the game.</span>
+      <div id="import-result" class="panel" hidden></div>
+    </div>
     <p class="foot">Elevation data: AWS Terrain Tiles (Mapzen / SRTM and others). Austrian station and peak positions: © OpenStreetMap contributors (ODbL).</p>
   </div>
 </div>
@@ -40,6 +46,7 @@
     <button id="plans-btn" title="Planned lifts and runs">📐 Plans</button>
     <button id="earthworks" title="Show all terraforming: red = dug away, blue = filled">⛏ Earthworks</button>
     <button id="contours" title="Height lines every 50 m, bold every 250 m (H)">≋ Height lines</button>
+    <button id="export-save" title="Download your progress as a file, to continue on another computer">💾 Save file</button>
     <button id="to-menu" title="Back to resort selection">Menu</button>
   </header>
 

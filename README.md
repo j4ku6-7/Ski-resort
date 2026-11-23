@@ -15,6 +15,12 @@ Each map has its own treeline (about 1 550 m in the Tatras, about 2 000 m in the
 
 The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), baked into `data/<resort>.js` by `tools/fetch_dem.py`.
 
+## Saving and playing on another computer
+Progress saves automatically in your browser. To continue on another computer:
+1. In the game, press **💾 Save file**. A small `.json` file goes to your downloads.
+2. Copy the game folder and that file to the other computer, for example on a USB stick or by cloning this repository.
+3. Open `index.html` there, click **📂 Import save file** in the menu, and pick the file.
+
 ## How to play
 1. **Lift**: pick a type, then click the bottom station and the top. The ends snap to lodges (⌂) and to run ends. Towers are placed automatically wherever the rope would touch the snow, or would hang too high above it for chairs, and each tower costs money.
 

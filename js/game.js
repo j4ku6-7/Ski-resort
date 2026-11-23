@@ -1270,4 +1270,29 @@ const Save = {
   clear(k) { try { localStorage.removeItem(this.key(k)); } catch { /* ignore */ } },
   best(k) { return this.get('skiresort.best.' + k); },
   record(k, days) { const b = this.best(k); if (!b || days > b.days) this.set('skiresort.best.' + k, { days }); },
+
+  // ---- moving a save between computers: a small JSON file ----
+  exportFile() {
+    if (!Game.map || Game.over) return null;
+    const data = { format: 'ski-resort-save', version: 1, resort: Game.map.key, resortName: Game.map.name,
+                   savedAt: new Date().toISOString(), best: this.best(Game.map.key), save: Game.serialize() };
+    const name = `ski-resort-${Game.map.key}-day${Game.day}.json`;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return name;
+  },
+  // check a loaded file; returns the parsed data or an error message
+  parseFile(text) {
+    let d;
+    try { d = JSON.parse(text); } catch { return { error: 'That file is not a ski resort save (it is not valid JSON).' }; }
+    if (!d || d.format !== 'ski-resort-save' || !d.save || !d.resort) return { error: 'That file is not a ski resort save.' };
+    if (!window.SKI_MAPS[d.resort]) return { error: `This save is for a resort this version doesn't have (${d.resort}).` };
+    return { data: d };
+  },
+  importData(d) {
+    this.set(this.key(d.resort), d.save);
+    if (d.best) this.record(d.resort, d.best.days);
+  },
 };

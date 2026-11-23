@@ -51,6 +51,7 @@ const App = {
   grading: false, holdAngle: false, gradeDeg: 13, manualPylons: false, edit: null, planMode: false, pylonFocus: true,
 
   init() {
+    this.bindImport();
     const menu = $('#resorts');
     for (const key of Object.keys(window.SKI_MAPS)) {
       const m = window.SKI_MAPS[key];
@@ -75,6 +76,26 @@ const App = {
       if (save) b.querySelector('[data-act="continue"]').onclick = () => this.start(key, save);
       menu.appendChild(b);
     }
+  },
+
+  bindImport() {
+    const input = $('#import-file'), box = $('#import-result');
+    $('#import-btn').onclick = () => input.click();
+    input.onchange = async () => {
+      const f = input.files && input.files[0];
+      input.value = '';
+      if (!f) return;
+      const r = Save.parseFile(await f.text());
+      box.hidden = false;
+      if (r.error) { box.innerHTML = `<p class="danger">${r.error}</p>`; return; }
+      const d = r.data, s = d.save, name = window.SKI_MAPS[d.resort].name, existing = Save.read(d.resort);
+      box.innerHTML = `<p><b>${name}</b> · day ${s.day} · ${money(s.money)} · ${s.lifts.length} lifts, ${s.runs.length} runs` +
+        (d.savedAt ? ` <span class="dim">(saved ${new Date(d.savedAt).toLocaleString()})</span>` : '') + '</p>' +
+        (existing ? `<p class="danger">This replaces your current ${name} save (day ${existing.day}, ${money(existing.money)}).</p>` : '') +
+        `<div class="btns"><button id="import-ok">${existing ? 'Replace and load' : 'Load this save'}</button><button id="import-cancel" class="ghost">Cancel</button></div>`;
+      $('#import-cancel').onclick = () => { box.hidden = true; };
+      $('#import-ok').onclick = () => { Save.importData(d); box.hidden = true; this.start(d.resort, Save.read(d.resort)); };
+    };
   },
 
   start(key, save) {
@@ -223,6 +244,11 @@ const App = {
     $('#retry').onclick = () => { Save.clear(Game.map.key); location.search = '?new=' + Game.map.key; };
     $('#over-menu').onclick = () => location.replace(location.pathname);
     $('#to-menu').onclick = () => { Save.write(); location.replace(location.pathname); };
+    $('#export-save').onclick = () => {
+      Save.write();
+      const name = Save.exportFile();
+      UI.toast(name ? `Saved ${name} to your downloads. On the other computer, choose "Import save file" in the menu.` : 'Nothing to save.');
+    };
     $('#finish-run').onclick = () => this.finishRun();
     $('#contours').onclick = () => this.toggleContours();
     $('#earthworks').onclick = () => this.toggleEarthworks();
