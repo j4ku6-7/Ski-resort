@@ -28,6 +28,7 @@ const Terrain = {
       if (H[i] > max) max = H[i];
     }
     this.H = H; this.maxY = max;
+    this.H0 = H.slice();                  // the untouched mountain, for the earthworks overlay
     this.W = (this.nx - 1) * this.cell;
     this.D = (this.nz - 1) * this.cell;
   },
@@ -129,37 +130,65 @@ const Terrain = {
 
   // Cut-and-fill along a graded piste. op.pts = centreline with target heights {x, z, y}.
   // Flat across the piste, blending back to natural ground over `margin`. Returns m³ moved.
-  applyEarthwork(op) {
+  // Height change per grid vertex for a graded piste (does not modify the terrain).
+  computeEarthwork(op) {
     const { nx, nz, cell: c, H } = this, pts = op.pts;
-    const half = op.half, margin = op.margin, reach = half + margin;
+    const half = op.half, reach = half + op.margin;
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
     const i0 = Math.max(0, Math.floor((x0 - reach) / c)), i1 = Math.min(nx - 1, Math.ceil((x1 + reach) / c));
     const j0 = Math.max(0, Math.floor((z0 - reach) / c)), j1 = Math.min(nz - 1, Math.ceil((z1 + reach) / c));
-    // trees in the zone: remember their ground height so they can follow the new surface (or be removed)
-    const trees = this.trees ? this.treesNear(pts, reach).map((i) => {
-      const x = this.trees.pts[3 * i], z = this.trees.pts[3 * i + 1];
-      return { i, x, z, y: this.height(x, z) };
-    }) : [];
-    let volume = 0;
+    // bucket the segments so each vertex only checks the ones that can be within reach
+    const B = reach + 10, buckets = new Map(), key = (bx, bz) => bx * 100003 + bz;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const a = pts[k], b = pts[k + 1];
+      for (let bx = Math.floor(Math.min(a.x, b.x) / B); bx <= Math.floor(Math.max(a.x, b.x) / B); bx++) {
+        for (let bz = Math.floor(Math.min(a.z, b.z) / B); bz <= Math.floor(Math.max(a.z, b.z) / B); bz++) {
+          const kk = key(bx, bz); if (!buckets.has(kk)) buckets.set(kk, []); buckets.get(kk).push(k);
+        }
+      }
+    }
+    const ks = [], dhs = [];
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
-        const x = i * c, z = j * c;
-        let best = Infinity, ty = 0;
-        for (let k = 0; k < pts.length - 1; k++) {
-          const a = pts[k], b = pts[k + 1], dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
-          if (Math.abs(x - a.x) > reach + 20 && Math.abs(x - b.x) > reach + 20) continue;
-          const t = l2 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2)) : 0;
-          const d = Math.hypot(x - a.x - t * dx, z - a.z - t * dz);
-          if (d < best) { best = d; ty = a.y + (b.y - a.y) * t; }
+        const x = i * c, z = j * c, cbx = Math.floor(x / B), cbz = Math.floor(z / B);
+        let best = Infinity, ty = 0, bestK = -1;
+        for (let bx = cbx - 1; bx <= cbx + 1; bx++) for (let bz = cbz - 1; bz <= cbz + 1; bz++) {
+          const list = buckets.get(key(bx, bz));
+          if (list) for (const k of list) {
+            const a = pts[k], b = pts[k + 1], dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
+            const t = l2 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2)) : 0;
+            const d = Math.hypot(x - a.x - t * dx, z - a.z - t * dz);
+            if (d < best || (d === best && k < bestK)) { best = d; bestK = k; ty = a.y + (b.y - a.y) * t; }
+          }
         }
         if (best > reach) continue;
         const w = best <= half ? 1 : 1 - smoothstep(half, reach, best);
         const k = j * nx + i, dh = (ty - H[k]) * w;
         if (Math.abs(dh) < 0.01) continue;
-        H[k] += dh; volume += Math.abs(dh) * c * c;
+        ks.push(k); dhs.push(dh);
       }
     }
+    let cut = 0, fill = 0, maxCut = 0, maxFill = 0;
+    for (const dh of dhs) {
+      if (dh < 0) { cut -= dh * c * c; maxCut = Math.max(maxCut, -dh); }
+      else { fill += dh * c * c; maxFill = Math.max(maxFill, dh); }
+    }
+    return { ks, dhs, cut, fill, maxCut, maxFill };
+  },
+
+  // Cut-and-fill along a graded piste. op.pts = centreline with target heights {x, z, y}.
+  // Flat across the piste, blending back to natural ground over `margin`. Returns m³ moved.
+  applyEarthwork(op) {
+    const reach = op.half + op.margin, H = this.H;
+    // trees in the zone: remember their ground height so they can follow the new surface (or be removed)
+    const trees = this.trees ? this.treesNear(op.pts, reach).map((i) => {
+      const x = this.trees.pts[3 * i], z = this.trees.pts[3 * i + 1];
+      return { i, x, z, y: this.height(x, z) };
+    }) : [];
+    const ew = this.computeEarthwork(op);
+    for (let n = 0; n < ew.ks.length; n++) H[ew.ks[n]] += ew.dhs[n];
+    const volume = ew.cut + ew.fill;
     if (this.trees) {
       const zero = new THREE.Matrix4().makeScale(0, 0, 0), m = new THREE.Matrix4(), cut = [];
       for (const t of trees) {
@@ -201,6 +230,46 @@ const Terrain = {
       for (let q = 0; q < 3; q++) out[3 * k + q] = base[3 * k + q] * 0.35 + t[q] * 0.65;
     }
     return out;
+  },
+
+  // Transparent overlay of height changes: red = dug away, blue = filled up. Drawn on whichever
+  // surface is higher so it is never hidden. `changes` = Map(vertex index -> metres).
+  earthOverlay(changes, lift = 1.2) {
+    const { nx, cell: c, H } = this, pos = [], col = [];
+    const cells = new Set();
+    for (const k of changes.keys()) {
+      const i = k % nx, j = (k / nx) | 0;
+      for (const [di, dj] of [[0, 0], [-1, 0], [0, -1], [-1, -1]]) {
+        if (i + di >= 0 && j + dj >= 0 && i + di < nx - 1 && j + dj < this.nz - 1) cells.add((j + dj) * nx + i + di);
+      }
+    }
+    const vert = (k) => {
+      const dh = changes.get(k) || 0, i = k % nx, j = (k / nx) | 0, a = Math.abs(dh);
+      pos.push(i * c, Math.max(H[k], H[k] + dh) + lift, j * c);
+      const t = Math.min(1, a / 8), alpha = a < 0.15 ? 0 : 0.25 + 0.55 * t;
+      if (dh < 0) col.push(0.95, 0.35 - 0.2 * t, 0.25 - 0.15 * t, alpha);
+      else col.push(0.25 - 0.15 * t, 0.55 - 0.2 * t, 1.0, alpha);
+    };
+    for (const k of cells) {
+      const a = k, b = k + 1, d = k + nx, e = d + 1;
+      for (const v of [a, d, b, b, d, e]) vert(v);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6,
+    }));
+    mesh.renderOrder = 8;
+    return mesh;
+  },
+
+  // every change made to the mountain so far
+  earthworksSoFar() {
+    const m = new Map();
+    for (let k = 0; k < this.H.length; k++) { const d = this.H[k] - this.H0[k]; if (Math.abs(d) > 0.05) m.set(k, d); }
+    return m;
   },
 
   showContours(on) { if (this.contours) this.contours.value = on ? 1 : 0; },

@@ -43,5 +43,7 @@ Keys: `1`–`5` pick tools, `H` toggles height lines (a thin line every 50 m, bo
 - **Hold angle while drawing:** the run steers across the hillside so the natural ground drops at the angle you pick. On a steep hill it traverses more.
 - **Terraform this run:** bulldozers cut and fill so no pitch is steeper than that angle, and level the piste side to side across the hill, blending back to the natural slope at the edges. Earthworks cost €0.50 per m³. The stations keep their height, so a steep straight line can't be graded into a blue; traverse instead.
 - Blue ≤ 14° (25%), Red ≤ 22° (40%), Black steeper. Earthworks are saved and replayed on load.
+- **Seeing the earthworks:** while you draw a graded run, the terrain shows what will be dug away (red) and filled (blue), with stronger colour for deeper work. The hint bar shows the cut and fill volumes and the deepest cut and fill. The **⛏ Earthworks** button in the top bar shows everything you've reshaped compared with the original mountain.
+- **When it's needed:** the run tool warns when an ungraded run leans more than about 17° sideways across the hill, which skiers dislike (beginners most), or when it's steeper than your chosen angle. **Terraform to ≤ X°** fixes it in one click.
 
 **Trees:** felling costs €150 per tree, and runs and lifts through forest include that cost. Clear more than 10% of the forest and the views suffer, so fewer visitors come. Use the Cut trees tool to clear areas by hand.

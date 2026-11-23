@@ -90,19 +90,7 @@ function gradeProfile(dense, maxG) {
     out.push({ x: dense[i].x, z: dense[i].z, y: clamp(dense[i].y, lo, hi) });
   }
   out[n - 1].y = yn;
-  // earth volume: the piste is levelled across its width and blended back to the slope at the edges
-  let volume = 0;
-  for (let i = 0; i < n; i++) {
-    const a = out[Math.max(0, i - 1)], b = out[Math.min(n - 1, i + 1)];
-    let dx = b.x - a.x, dz = b.z - a.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
-    const ds = (s[Math.min(n - 1, i + 1)] - s[Math.max(0, i - 1)]) / 2;
-    for (let o = -(GRADE_HALF + GRADE_MARGIN); o <= GRADE_HALF + GRADE_MARGIN; o += 8) {
-      const x = out[i].x - dz * o, z = out[i].z + dx * o, d = Math.abs(o);
-      const w = d <= GRADE_HALF ? 1 : 1 - smoothstep(GRADE_HALF, GRADE_HALF + GRADE_MARGIN, d);
-      volume += Math.abs(out[i].y - Terrain.height(x, z)) * w * 8 * ds;
-    }
-  }
-  return { pts: out, volume, avg };
+  return { pts: out, avg };
 }
 
 // Next point when drawing at a held angle: head across the fall line so the natural ground drops
@@ -333,6 +321,9 @@ const Net = {
                  msg: `This line averages ${gradeToDeg(earth.avg).toFixed(0)}°. Grading can't make it ≤ ${gradeDeg}° without moving the stations, so draw it across the slope (try Hold angle).` };
       }
       dense = earth.pts;
+      // exact cut-and-fill on the 20 m grid: the same numbers the preview overlay shows
+      const ew = Terrain.computeEarthwork({ pts: dense, half: GRADE_HALF, margin: GRADE_MARGIN });
+      earth.volume = ew.cut + ew.fill; earth.cut = ew.cut; earth.fill = ew.fill;
     }
     const hc = [0];
     for (let i = 1; i < dense.length; i++) hc.push(hc[i - 1] + Math.hypot(dense[i].x - dense[i - 1].x, dense[i].z - dense[i - 1].z));
@@ -356,6 +347,17 @@ const Net = {
       const g = hc[j] - hc[i] > 20 ? (dense[i].y - dense[j].y) / (hc[j] - hc[i]) : -1;
       if (g > best) { best = g; steepAt = (i + j) >> 1; }
     }
+    // side-hill: how much the piste would lean sideways (worst ~50 m stretch); a graded piste is level
+    let cross = 0;
+    if (!earth) {
+      const cs = dense.map((p, i) => {
+        const a = dense[Math.max(0, i - 1)], b = dense[Math.min(dense.length - 1, i + 1)];
+        let dx = b.x - a.x, dz = b.z - a.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+        const o = RUN_WIDTH / 2;
+        return Math.abs(Terrain.height(p.x - dz * o, p.z + dx * o) - Terrain.height(p.x + dz * o, p.z - dx * o)) / RUN_WIDTH;
+      });
+      for (let i = 0; i + 6 <= cs.length; i++) { let m = 0; for (let q = i; q < i + 6; q++) m += cs[q]; cross = Math.max(cross, m / 6); }
+    }
     const trees = Terrain.treesNear(dense, RUN_WIDTH * 0.65).length;
     const path = new Path(dense), len = path.length;
     const drop = dense[0].y - dense[dense.length - 1].y;
@@ -368,7 +370,7 @@ const Net = {
     else if (maxG > 0.9) msg = earth ? 'Too steep to groom (over 42°)' : 'Too steep to groom (over 42°). Turn on grading to flatten it.';
     else if (!free && cost > Game.money) msg = 'Not enough money';
     return { ok: !msg, msg, dense, path, len, drop, maxG, diff, cost, build, trees, colors, steepAt, points,
-             gradeDeg, volume: earth ? earth.volume : 0, earthCost };
+             gradeDeg, volume: earth ? earth.volume : 0, earthCost, cross };
   },
 
   buildRun(plan, free = false) {
@@ -384,7 +386,7 @@ const Net = {
     }
     const A = this.pointNode(plan.points[0]), B = this.pointNode(plan.points[plan.points.length - 1]);
     const r = { kind: 'run', id: this.seq.run++, a: A, b: B, diff: plan.diff, path: plan.path, len: plan.len,
-                drop: plan.drop, maxG: plan.maxG, cost: plan.build, gradeDeg: plan.gradeDeg || null,
+                drop: plan.drop, maxG: plan.maxG, cost: plan.build, gradeDeg: plan.gradeDeg || null, cross: plan.cross || 0,
                 points: plan.points.map((p) => ({ x: p.x, z: p.z })) };
     r.name = `Run ${r.id}`;
     r.vis = makeRibbon(plan.dense, DIFF[r.diff].color);
@@ -638,7 +640,8 @@ const Game = {
         s.d += SKILL[s.skill].speed * s.pace * (0.75 + 0.7 * Math.min(1, steep / 0.4)) * dt;
         if (s.d >= r.path.length) {
           s.done++;
-          s.happy = clamp(s.happy + SKILL[s.skill].pref[r.diff] + (s.last !== r ? 2 : -1), 0, 100);
+          const lean = Math.max(0, r.cross - 0.3) * (s.skill === 0 ? 30 : 15);   // tilted side-hill piste
+          s.happy = clamp(s.happy + SKILL[s.skill].pref[r.diff] + (s.last !== r ? 2 : -1) - lean, 0, 100);
           s.last = r; s.state = 'atNode'; s.node = r.b; s.edge = null;
         }
         break;

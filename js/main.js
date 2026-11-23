@@ -195,6 +195,8 @@ const App = {
     $('#to-menu').onclick = () => { Save.write(); location.replace(location.pathname); };
     $('#finish-run').onclick = () => this.finishRun();
     $('#contours').onclick = () => this.toggleContours();
+    $('#earthworks').onclick = () => this.toggleEarthworks();
+    $('#grade-it').onclick = () => { this.grading = true; this.syncRunOptions(); };
 
     addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT') return;
@@ -223,6 +225,7 @@ const App = {
     this.controls.mouseButtons.RIGHT = drawing ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
     $('#slope-legend').hidden = t !== 'run';
     this.clearPreview();
+    this.clearEarthPreview();
     this.updateHover();
   },
 
@@ -307,6 +310,7 @@ const App = {
     let hint = '';
     const at = h ? `<span class="dim">${Math.round(Terrain.elev(h.y))} m · slope ${Math.round(Terrain.slope(h.x, h.z) * 100)}%</span>` : '';
     $('#finish-run').hidden = true;
+    $('#grade-it').hidden = true;
     if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom · click a lift for its options.';
     else if (t === 'bulldoze') hint = 'Click a lift or run to remove it (50% refund).';
     else if (t === 'cut') {
@@ -346,13 +350,16 @@ const App = {
           hint = `<b style="color:${DIFF[plan.diff].css === '#18181c' ? '#fff' : DIFF[plan.diff].css}">${DIFF[plan.diff].name}</b> · ${(plan.len / 1000).toFixed(2)} km · drop ${fmt(plan.drop)} m · steepest ${Math.round(plan.maxG * 100)}% · <b>${money(plan.cost)}</b>` +
             (plan.trees ? ` <span class="dim">(incl. ${plan.trees} trees)</span>` : '') +
             (plan.gradeDeg ? `<br>Grading to ≤ ${plan.gradeDeg}°: ${fmt(plan.volume)} m³ of cut and fill · ${money(plan.earthCost)}` : '') +
+            this.gradingNeeds(plan) +
             (this.holdAngle && pts[pts.length - 2] && pts[pts.length - 2].fallAngle ? `<br><span class="dim">Holding ${this.gradeDeg}° by heading ${Math.round(pts[pts.length - 2].fallAngle)}° off the fall line</span>` : '') +
             (plan.ok ? '' : ` — <span class="neg">${plan.msg}</span>`) +
             '<br><span class="dim">Keep dragging or clicking · end on a lift or lodge to finish, or press Enter · Backspace undo · Esc cancel</span>';
         }
         $('#finish-run').hidden = d.pts.length < 2;
+        if (plan.gradeDeg && plan.dense && plan.path && plan.len) this.queueEarthPreview(plan.dense);
+        else this.clearEarthPreview();
       }
-    }
+    } else this.clearEarthPreview();
     $('#hint').innerHTML = hint + (at ? ' ' + at : '');
   },
 
@@ -391,6 +398,52 @@ const App = {
 
   grade() { return this.grading ? this.gradeDeg : null; },
 
+  // Tell the player when a run needs terraforming, and offer a one-click fix.
+  gradingNeeds(plan) {
+    if (plan.gradeDeg) return '';
+    const out = [], target = degToGrade(this.gradeDeg);
+    if (plan.cross > 0.3) out.push(`leans ${Math.round(gradeToDeg(plan.cross))}° sideways across the hill, which skiers dislike`);
+    if (plan.maxG > target) out.push(`is steeper than your ${this.gradeDeg}° angle (${Math.round(gradeToDeg(plan.maxG))}° at its worst)`);
+    if (!out.length) return '';
+    $('#grade-it').hidden = false;
+    $('#grade-it').textContent = `Terraform to ≤ ${this.gradeDeg}°`;
+    return `<br><span class="warn">⚠ Terraforming needed: this run ${out.join(' and ')}.</span>`;
+  },
+
+  queueEarthPreview(dense) {
+    clearTimeout(this.earthTimer);
+    this.earthTimer = setTimeout(() => {
+      const ew = Terrain.computeEarthwork({ pts: dense, half: GRADE_HALF, margin: GRADE_MARGIN });
+      const changes = new Map(ew.ks.map((k, n) => [k, ew.dhs[n]]));
+      this.clearEarthPreview(false);
+      this.earthMesh = Terrain.earthOverlay(changes);
+      this.scene.add(this.earthMesh);
+      $('#earth-info').innerHTML = ew.ks.length
+        ? `<span class="cut">■</span> cut ${fmt(ew.cut)} m³ (up to ${ew.maxCut.toFixed(1)} m deep) · <span class="fill">■</span> fill ${fmt(ew.fill)} m³ (up to ${ew.maxFill.toFixed(1)} m high)`
+        : 'No earthworks needed. The ground is already within the angle.';
+      $('#earth-info').hidden = false;
+    }, 90);
+  },
+  clearEarthPreview(cancel = true) {
+    if (cancel) clearTimeout(this.earthTimer);
+    if (this.earthMesh) { this.scene.remove(this.earthMesh); this.earthMesh.geometry.dispose(); this.earthMesh.material.dispose(); this.earthMesh = null; }
+    if (cancel) $('#earth-info').hidden = true;
+  },
+
+  toggleEarthworks(on = !this.earthOn) {
+    this.earthOn = on;
+    $('#earthworks').classList.toggle('active', on);
+    this.refreshEarthworks();
+  },
+  refreshEarthworks() {
+    if (this.allEarth) { this.scene.remove(this.allEarth); this.allEarth.geometry.dispose(); this.allEarth.material.dispose(); this.allEarth = null; }
+    if (!this.earthOn) return;
+    const changes = Terrain.earthworksSoFar();
+    if (!changes.size) { UI.toast('No terraforming yet. Turn on "Terraform this run" in the Ski run tool.'); return; }
+    this.allEarth = Terrain.earthOverlay(changes, 0.8);
+    this.scene.add(this.allEarth);
+  },
+
   toggleContours(on = !this.contoursOn) {
     this.contoursOn = on;
     Terrain.showContours(on);
@@ -417,7 +470,7 @@ const App = {
   },
 
   bindRunOptions() {
-    const sync = () => {
+    const sync = this.syncRunOptions = () => {
       const g = degToGrade(this.gradeDeg), cls = g <= 0.25 ? 0 : g <= 0.4 ? 1 : 2;
       $('#ro-grade').checked = this.grading;
       $('#ro-hold').checked = this.holdAngle;
@@ -551,6 +604,8 @@ const App = {
     if (!plan.ok) { d.pts.pop(); this.updateHover(); return UI.toast(plan.msg); }
     const r = Net.buildRun(plan);
     UI.toast(`${r.name} (${DIFF[r.diff].name}) built for ${money(plan.cost)}`);
+    this.clearEarthPreview();
+    if (plan.gradeDeg) this.refreshEarthworks();
     Save.write();
     this.draft = { pts: [] };
     this.updateHover();

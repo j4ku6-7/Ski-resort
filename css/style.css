@@ -139,3 +139,12 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 #menu { overflow-y: auto; padding: 24px 16px; }
 .menu-inner { width: min(980px, 94vw); }
 #resorts { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+
+/* ---------- earthworks ---------- */
+#hintbar { flex-wrap: wrap; }
+#earth-info { flex-basis: 100%; font-size: 13px; }
+#earth-info .cut { color: #ff5a3c; } #earth-info .fill { color: #4a8dff; }
+.warn { color: #ffcf5a; }
+#grade-it { border: 0; border-radius: 8px; padding: 6px 12px; background: #ffcf5a; font-weight: 700; white-space: nowrap; }
+#earthworks { border: 0; background: #e8eef5; padding: 6px 10px; border-radius: 7px; }
+#earthworks.active { background: #b5452b; color: #fff; }
