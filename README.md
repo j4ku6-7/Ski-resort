@@ -28,7 +28,7 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
    | 8-person gondola | 2 880/h | 6 m/s | enclosed, up to 6 km |
    | Aerial tramway | about 400/h | 10 m/s | two shuttling cabins, very few towers, spans cliffs |
 
-   **Pylons:** tick *Place pylons myself* in the lift picker, or press *Edit pylons* in a lift's panel. Click the lift line to add a pylon, drag pylons along the line, use `+`/`−` to change their height (Shift = 5 m steps) and `Del` to remove one. Taller pylons cost more. The rope is coloured by the safety check: green is fine, orange is tight, red means carriers hit the snow, and yellow means chairs hang too high above the ground to evacuate. Spans that are too long are flagged as well. A lift that fails inspection stays closed. Press Done to pay for the changes (removed pylons are refunded at 50%), or Cancel to revert. Placing pylons yourself is often cheaper than the automatic layout.
+   **Pylons:** tick *Place pylons myself* in the lift picker, or press *Edit pylons* in a lift's panel. Click the lift line to add a pylon, drag pylons along the line, use `+`/`−` to change their height (Shift = 5 m steps) and `Del` to remove one. Taller pylons cost more. The rope is coloured by the safety check: green is fine, orange is tight, red means carriers hit the snow, and yellow means chairs hang too high above the ground to evacuate. Spans that are too long are flagged as well. A lift that fails inspection stays closed. Press Done to pay for the changes (removed pylons are refunded at 50%), or Cancel to revert. Placing pylons yourself is often cheaper than the automatic layout. The editor flies the camera to a side view of the lift and opens a **side-view profile** along the bottom of the screen, with the vertical scale stretched so every pylon is visible. Click it to add a pylon at that height, drag a pylon left/right to move it or up/down to change its height, and right-click to remove it.
 
    Click a lift in View mode to rename it, change its line speed and how many carriers run, open or close it, upgrade it to another type (half the old lift's value is credited), or remove it.
 2. **Ski run**: drag from a lift top down the slope, or click point by point. The line is smoothed into a curve. While you draw, the terrain shows a slope map and the preview is coloured by local steepness, with the steepest section marked. End on a lift bottom or a lodge, or press Enter, to finish.
@@ -39,6 +39,8 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
    - Intermediates ski blue and red runs.
    - Experts ski all runs.
 4. Skiers lose happiness from long queues, from dead ends (they have to walk back), and from having nothing they can ski. Happiness drives reputation, and reputation drives visitor numbers.
+
+**Camera:** drag to rotate, right-drag to pan, and scroll to zoom toward the cursor. WASD or the arrow keys move, Q/E turn, and double-click (in View mode) flies there.
 
 Keys: `1`–`5` pick tools, `H` toggles height lines (a thin line every 50 m, bold every 250 m), `Esc` cancels, `Backspace` removes the last run point, `[` `]` change the tree brush size, `Space` pauses.
 

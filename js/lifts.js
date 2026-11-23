@@ -157,7 +157,7 @@ const Lifts = {
         if (st === 'hit' && !inHit) hitRuns++;
         inHit = st === 'hit';
         if (st === 'high') high = Math.max(high, y - g);
-        samples.push({ x: a.x + P.ux * s, y, z: a.z + P.uz * s, st });
+        samples.push({ s, x: a.x + P.ux * s, y, z: a.z + P.uz * s, st });
       }
     }
     if (hitRuns) issues.push(T.kind === 'surface' ? `The rope drags on the snow in ${hitRuns} place${hitRuns > 1 ? 's' : ''}` :
@@ -318,12 +318,12 @@ const Lifts = {
         mesh(G.pylon, M.steel, x, gy - 2, z, 2.2, top - gy + 6, 2.2);
         mesh(G.box, M.steel, x, top + 3, z, T.gauge * 2 + 6, 2, 3);
       } else if (T.kind === 'surface') {
-        mesh(G.pole, M.steel, x, gy - 1, z, 1.1, top - gy + 1.5, 1.1);
+        mesh(G.pole, M.steel, x, gy - 1, z, 1.8, top - gy + 1.5, 1.8);
         mesh(G.box, M.steel, x + px * T.gauge / 2, top + 0.3, z + pz * T.gauge / 2, T.gauge + 1, 0.4, 0.4);
       } else {
-        const r = T.towerH > 20 ? 2.6 : 2;
+        const r = T.towerH > 20 ? 3.6 : 3;
         mesh(G.pole, M.steel, x, gy - 1, z, r, top - gy + 3, r);
-        mesh(G.box, M.steel, x, top + 2, z, T.gauge * 2 + 2.5, 1.1, 1.1);
+        mesh(G.box, M.steel, x, top + 2, z, T.gauge * 2 + 3, 1.8, 1.8);
         for (const sgn of [1, -1]) mesh(G.box, M.dark, x + px * T.gauge * sgn, top + 0.8, z + pz * T.gauge * sgn, 1, 1.3, 8);
       }
     }

@@ -115,7 +115,8 @@ const App = {
     const controls = this.controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.target.set(tx, ty, tz);
     controls.enableDamping = true; controls.dampingFactor = 0.12;
-    controls.maxPolarAngle = 1.42; controls.minDistance = 250; controls.maxDistance = 16000;
+    controls.maxPolarAngle = 1.45; controls.minDistance = 40; controls.maxDistance = 16000;
+    controls.zoomSpeed = 1.2;
     controls.screenSpacePanning = false;
     controls.update();
 
@@ -142,6 +143,7 @@ const App = {
     this.bindInput();
     this.bindLiftPanel();
     this.bindPylonPanel();
+    this.bindProfile();
     this.bindRunOptions();
     let contours = false;
     try { contours = localStorage.getItem('skiresort.contours') === '1'; } catch { /* ignore */ }
@@ -192,6 +194,24 @@ const App = {
     });
     el.addEventListener('pointerleave', () => { this.mouse = null; this.updateHover(); });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
+    // zoom toward whatever is under the cursor (runs before OrbitControls' own dolly)
+    el.addEventListener('wheel', (e) => {
+      this.mouse = { x: e.clientX, y: e.clientY };
+      const hit = this.pickTerrain();
+      if (!hit) return;
+      const f = e.deltaY < 0 ? 0.18 : -0.06;
+      const t = this.controls.target, dx = (hit.x - t.x) * f, dy = (hit.y - t.y) * f, dz = (hit.z - t.z) * f;
+      t.x += dx; t.y += dy; t.z += dz;
+      this.camera.position.x += dx; this.camera.position.y += dy; this.camera.position.z += dz;
+    }, { capture: true, passive: true });
+    el.addEventListener('dblclick', () => {
+      if (this.tool !== 'select') return;   // in build tools a double-click is two clicks
+      const h = this.pickTerrain(); if (h) this.flyTo(h, Math.min(this.camDist(), 900));
+    });
+    this.keys = new Set();
+    addEventListener('keydown', (e) => { if (e.target.tagName !== 'INPUT' || e.target.type === 'range') this.keys.add(e.key.toLowerCase()); });
+    addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+    addEventListener('blur', () => this.keys.clear());
 
     for (const b of document.querySelectorAll('[data-tool]')) b.onclick = () => this.setTool(b.dataset.tool);
     for (const b of document.querySelectorAll('[data-speed]')) b.onclick = () => this.setSpeed(+b.dataset.speed);
@@ -237,6 +257,7 @@ const App = {
     $('#lift-types').hidden = t !== 'lift';
     $('#run-options').hidden = t !== 'run';
     $('#pylon-panel').hidden = t !== 'pylons';
+    $('#profile-dock').hidden = t !== 'pylons';
     for (const b of document.querySelectorAll('[data-tool]')) b.classList.toggle('active', b.dataset.tool === t);
     const drawing = t === 'run' || t === 'cut';
     Terrain.showSlopeMap(t === 'run');
@@ -334,7 +355,7 @@ const App = {
     const at = h ? `<span class="dim">${Math.round(Terrain.elev(h.y))} m · slope ${Math.round(Terrain.slope(h.x, h.z) * 100)}%</span>` : '';
     $('#finish-run').hidden = true;
     $('#grade-it').hidden = true;
-    if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom · click a lift for its options.';
+    if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom toward the cursor · WASD/arrows move · Q/E turn · double-click to fly there · click a lift for its options.';
     else if (t === 'bulldoze') hint = 'Click a lift or run to remove it (50% refund).';
     else if (t === 'pylons' && this.edit) {
       const e = this.edit;
@@ -537,12 +558,17 @@ const App = {
     const T = l.T, start = (l.customTowers || Lifts.autoTowers(T, l.a, l.a.y, l.b, l.b.y)).map((t) => ({ ...t }));
     this.edit = {
       l, origCustom: l.customTowers ? l.customTowers.map((t) => ({ ...t })) : null,
-      origValue: Lifts.towersValue(T, start), towers: start, sel: null, hover: null, ghost: null,
+      origValue: Lifts.towersValue(T, start), towers: start, sel: null, hover: null, ghost: null, profScale: null,
       wasOpen: l.opt.open || !!l.awaitInspection,
     };
     this.closeLiftPanel();
+    this.profScale = null;
     this.setTool('pylons');
     this.applyPylons();
+    const hl = Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z), mid = { x: (l.a.x + l.b.x) / 2, z: (l.a.z + l.b.z) / 2 };
+    mid.y = Terrain.height(mid.x, mid.z);
+    const side = Math.sign((this.camera.position.x - mid.x) * l.dir.px + (this.camera.position.z - mid.z) * l.dir.pz) || 1;
+    this.flyTo(mid, Math.max(400, hl * 0.85), { x: l.dir.px * side, y: 0.45, z: l.dir.pz * side });
   },
 
   applyPylons() {
@@ -579,7 +605,7 @@ const App = {
       this.editGroup = null;
     }
     const e = this.edit;
-    if (!e) return;
+    if (!e) { for (const lb of this.pylonLabels || []) lb.remove(); this.pylonLabels = []; return; }
     const l = e.l, T = l.T, P = l.profileP, g = new THREE.Group();
     const { samples } = Lifts.inspect(T, P, l.a);
     const col = { ok: [0.24, 1, 0.6], low: [1, 0.6, 0.1], hit: [1, 0.2, 0.15], high: [1, 0.85, 0.2] };
@@ -598,15 +624,26 @@ const App = {
       const t = e.towers[i], x = l.a.x + l.dir.ux * t.s, z = l.a.z + l.dir.uz * t.s, gy = Terrain.height(x, z);
       const m = new THREE.Mesh(new THREE.SphereGeometry(T.gauge + 3, 14, 10), new THREE.MeshBasicMaterial({
         color: i === e.sel ? 0x35e0ff : i === e.hover ? 0xffcf5a : 0xffffff, depthTest: false, transparent: true, opacity: 0.85 }));
-      m.position.set(x, gy + t.h + 2, z); m.renderOrder = 13; g.add(m);
+      m.position.set(x, gy + t.h + 2, z); m.renderOrder = 13; m.userData.handle = true; g.add(m);
+      // vertical guide so the pylon reads even when it is tiny on screen
+      const vg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, gy, z), new THREE.Vector3(x, gy + t.h, z)]);
+      const v = new THREE.Line(vg, new THREE.LineBasicMaterial({ color: i === e.sel ? 0x35e0ff : 0xffffff, depthTest: false }));
+      v.renderOrder = 13; g.add(v);
     }
+    // labels: P1 · 18 m
+    for (const lb of this.pylonLabels || []) lb.remove();
+    this.pylonLabels = order.map((i, rank) => {
+      const t = e.towers[i], x = l.a.x + l.dir.ux * t.s, z = l.a.z + l.dir.uz * t.s;
+      return Labels.add(`P${rank + 1} · ${Math.round(t.h)} m`, 'pylon' + (i === e.sel ? ' sel' : ''), { x, y: Terrain.height(x, z) + t.h + 14, z });
+    });
     if (e.ghost != null) {
       const x = l.a.x + l.dir.ux * e.ghost, z = l.a.z + l.dir.uz * e.ghost, gy = Terrain.height(x, z);
       const m = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.4, T.towerH, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthTest: false }));
-      m.position.set(x, gy + T.towerH / 2, z); m.renderOrder = 13; g.add(m);
+      m.position.set(x, gy + T.towerH / 2, z); m.renderOrder = 13; m.userData.handle = true; g.add(m);
     }
     this.editGroup = g; this.scene.add(g);
     this.pylonOrder = order;
+    this.drawProfile();
   },
 
   refreshPylonPanel() {
@@ -626,6 +663,135 @@ const App = {
       const r = $('#pp-h'); r.min = this.minPylon(T); r.max = T.maxTowerH; r.value = sel.h;
       $('#pp-h-v').textContent = `${Math.round(sel.h)} m · ${money(Lifts.towerPrice(T, sel.h))}`;
     }
+  },
+
+  // Side view of the lift line: ground, rope (coloured by inspection), pylons. Vertical scale is
+  // stretched to fit, so every pylon is visible and can be dragged in both directions.
+  profileView() {
+    const cv = $('#profile'), dpr = devicePixelRatio || 1;
+    const W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const e = this.edit, l = e.l, P = l.profileP, hl = P.hl;
+    if (!this.profScale || this.profDrag == null) {
+      let lo = Infinity, hi = -Infinity;
+      for (let s = 0; s <= hl; s += 5) { const g = P.ground(s); lo = Math.min(lo, g); hi = Math.max(hi, g); }
+      for (const p of P.prof) hi = Math.max(hi, p.y);
+      hi = Math.max(hi, lo + 30);
+      const pad = (hi - lo) * 0.12 + 8;
+      this.profScale = { lo: lo - pad * 0.4, hi: hi + pad };
+    }
+    const { lo, hi } = this.profScale, ml = 46, mr = 14, mt = 12, mb = 22;
+    return {
+      cv, dpr, W, H, hl, P, l,
+      sx: (s) => ml + (s / hl) * (W - ml - mr), xs: (x) => ((x - ml) / (W - ml - mr)) * hl,
+      sy: (y) => mt + (1 - (y - lo) / (hi - lo)) * (H - mt - mb), ys: (py) => lo + (1 - (py - mt) / (H - mt - mb)) * (hi - lo),
+      ml, mr, mt, mb, lo, hi,
+    };
+  },
+
+  drawProfile() {
+    const e = this.edit;
+    if (!e || $('#profile-dock').hidden) return;
+    const v = this.profileView(), { cv, dpr, W, H, hl, P, l, sx, sy } = v, T = l.T;
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#eef3f8'; ctx.fillRect(0, 0, W, H);
+    // elevation grid
+    ctx.font = '11px system-ui, sans-serif'; ctx.fillStyle = '#6b7785'; ctx.strokeStyle = '#d7e0ea'; ctx.lineWidth = 1;
+    const step = [10, 20, 50, 100, 200, 500].find((s) => (v.hi - v.lo) / s < 7) || 1000;
+    for (let y = Math.ceil(v.lo / step) * step; y < v.hi; y += step) {
+      ctx.beginPath(); ctx.moveTo(v.ml, sy(y)); ctx.lineTo(W - v.mr, sy(y)); ctx.stroke();
+      ctx.fillText(`${Math.round(Terrain.elev(y))}`, 4, sy(y) + 4);
+    }
+    ctx.fillText('0 m', v.ml, H - 6);
+    ctx.fillText(`${fmt(hl)} m`, W - v.mr - 46, H - 6);
+    // ground
+    ctx.beginPath(); ctx.moveTo(sx(0), H - v.mb);
+    for (let s = 0; s <= hl; s += Math.max(2, hl / 400)) ctx.lineTo(sx(s), sy(P.ground(s)));
+    ctx.lineTo(sx(hl), sy(P.ground(hl))); ctx.lineTo(sx(hl), H - v.mb); ctx.closePath();
+    ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = '#8a9aab'; ctx.lineWidth = 1.5; ctx.stroke();
+    // carrier clearance line (bottom of the chairs/cabins)
+    const insp = Lifts.inspect(T, P, l.a), hang = T.kind === 'surface' ? 0 : (T.hang || 1) * CS;
+    if (hang) {
+      ctx.setLineDash([4, 4]); ctx.strokeStyle = '#9aa7b5'; ctx.lineWidth = 1; ctx.beginPath();
+      insp.samples.forEach((p, i) => { const X = sx(p.s), Y = sy(p.y - hang); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    // rope, coloured by inspection status
+    const col = { ok: '#1fbf6a', low: '#ff9a1a', hit: '#ff3b2f', high: '#e6b800' };
+    ctx.lineWidth = 3;
+    for (let i = 0; i < insp.samples.length - 1; i++) {
+      const p = insp.samples[i], q = insp.samples[i + 1];
+      ctx.strokeStyle = col[p.st === 'ok' ? q.st : p.st];
+      ctx.beginPath(); ctx.moveTo(sx(p.s), sy(p.y)); ctx.lineTo(sx(q.s), sy(q.y)); ctx.stroke();
+    }
+    // stations
+    ctx.fillStyle = '#4a5562';
+    for (const s of [0, hl]) { const g = P.ground(s); ctx.fillRect(sx(s) - 6, sy(g + T.towerH), 12, sy(g) - sy(g + T.towerH)); }
+    // pylons
+    const order = this.pylonOrder || e.towers.map((_, i) => i);
+    e.towers.forEach((t, i) => {
+      const g = P.ground(t.s), X = sx(t.s), sel = i === e.sel, hov = i === e.hover;
+      ctx.strokeStyle = sel ? '#0aa8d6' : hov ? '#e0a400' : '#2b3440'; ctx.lineWidth = sel || hov ? 4 : 3;
+      ctx.beginPath(); ctx.moveTo(X, sy(g)); ctx.lineTo(X, sy(g + t.h)); ctx.stroke();
+      ctx.fillStyle = sel ? '#35e0ff' : hov ? '#ffcf5a' : '#ffffff';
+      ctx.beginPath(); ctx.arc(X, sy(g + t.h), 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      if (sel || hov || e.towers.length <= 14) {
+        ctx.fillStyle = '#1b2430'; ctx.font = (sel ? 'bold ' : '') + '11px system-ui, sans-serif';
+        ctx.fillText(`P${order.indexOf(i) + 1} ${Math.round(t.h)} m`, X - 18, sy(g + t.h) - 10);
+      }
+    });
+    // ghost pylon under the mouse
+    if (this.profGhost) {
+      const { s, h } = this.profGhost, g = P.ground(s);
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = '#2b3440'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(sx(s), sy(g)); ctx.lineTo(sx(s), sy(g + h)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#1b2430'; ctx.fillText(`+ ${Math.round(h)} m · ${money(Lifts.towerPrice(T, h))}`, sx(s) + 6, sy(g + h) - 4);
+    }
+  },
+
+  bindProfile() {
+    const cv = $('#profile');
+    const at = (ev) => {
+      const r = cv.getBoundingClientRect(), v = this.profileView(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+      const s = v.xs(x), T = this.edit.l.T, g = v.P.ground(clamp(s, 0, v.hl));
+      return { v, x, y, s, h: clamp(v.ys(y) - g, this.minPylon(T), T.maxTowerH) };
+    };
+    const near = (p) => {
+      let best = null, bd = 9;
+      this.edit.towers.forEach((t, i) => { const d = Math.abs(p.v.sx(t.s) - p.x); if (d < bd) { bd = d; best = i; } });
+      return best;
+    };
+    cv.addEventListener('pointermove', (ev) => {
+      const e = this.edit; if (!e) return;
+      const p = at(ev);
+      if (this.profDrag != null) {
+        const t = e.towers[this.profDrag];
+        t.s = clamp(p.s, 12, p.v.hl - 12); t.h = Math.round(p.h);
+        if (!this.profRaf) this.profRaf = requestAnimationFrame(() => { this.profRaf = 0; this.applyPylons(); });
+        return;
+      }
+      const hov = near(p);
+      e.hover = hov;
+      this.profGhost = hov == null && p.s > 12 && p.s < p.v.hl - 12 ? { s: p.s, h: Math.round(p.h) } : null;
+      this.drawPylonOverlay();
+    });
+    cv.addEventListener('pointerleave', () => { if (this.edit && this.profDrag == null) { this.profGhost = null; this.edit.hover = null; this.drawPylonOverlay(); } });
+    cv.addEventListener('pointerdown', (ev) => {
+      const e = this.edit; if (!e) return;
+      const p = at(ev);
+      if (ev.button === 2) { const i = near(p); if (i != null) { e.sel = i; this.removePylon(); } return; }
+      let i = near(p);
+      if (i == null && p.s > 12 && p.s < p.v.hl - 12) { e.towers.push({ s: p.s, h: Math.round(p.h) }); i = e.towers.length - 1; }
+      if (i == null) return;
+      e.sel = i; this.profDrag = i; this.profGhost = null;
+      cv.setPointerCapture(ev.pointerId);
+      this.applyPylons();
+    });
+    cv.addEventListener('pointerup', () => { if (this.profDrag != null) { this.profDrag = null; this.profScale = null; this.applyPylons(); } });
+    cv.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    addEventListener('resize', () => this.drawProfile());
   },
 
   removePylon() {
@@ -663,6 +829,7 @@ const App = {
     if (e.wasOpen && !l.awaitInspection) Net.setLiftOpen(l, true);
     this.drawPylonOverlay();
     $('#pylon-panel').hidden = true;
+    $('#profile-dock').hidden = true;
   },
 
   bindPylonPanel() {
@@ -812,6 +979,61 @@ const App = {
   },
 
   // ---------- loop ----------
+  camDist() { return this.camera.position.distanceTo(this.controls.target); },
+
+  // Smoothly move the orbit centre to `target`, ending `dist` metres away, optionally from direction `dir`.
+  flyTo(target, dist, dir = null) {
+    const c = this.camera, t = this.controls.target;
+    const off = dir ? new THREE.Vector3(dir.x, dir.y, dir.z).normalize() : c.position.clone().sub(t).normalize();
+    this.fly = {
+      t0: performance.now(), dur: 700,
+      fromT: t.clone(), toT: new THREE.Vector3(target.x, target.y, target.z),
+      fromP: c.position.clone(), toP: new THREE.Vector3(target.x, target.y, target.z).add(off.multiplyScalar(dist)),
+    };
+  },
+
+  updateCamera(dt) {
+    const c = this.camera, t = this.controls.target;
+    if (this.fly) {
+      const f = this.fly, u = Math.min(1, (performance.now() - f.t0) / f.dur), e = u * u * (3 - 2 * u);
+      t.lerpVectors(f.fromT, f.toT, e); c.position.lerpVectors(f.fromP, f.toP, e);
+      if (u >= 1) this.fly = null;
+    }
+    // keyboard: WASD / arrows pan, Q/E rotate
+    const k = this.keys || new Set(), dist = this.camDist();
+    let fx = 0, fz = 0, rot = 0;
+    if (k.has('w') || k.has('arrowup')) fz += 1;
+    if (k.has('s') || k.has('arrowdown')) fz -= 1;
+    if (k.has('a') || k.has('arrowleft')) fx -= 1;
+    if (k.has('d') || k.has('arrowright')) fx += 1;
+    if (k.has('q')) rot += 1;
+    if (k.has('e')) rot -= 1;
+    if (fx || fz) {
+      const fwd = t.clone().sub(c.position); fwd.y = 0; fwd.normalize();
+      const right = new THREE.Vector3(-fwd.z, 0, fwd.x), sp = dist * 0.9 * dt;
+      const mv = fwd.multiplyScalar(fz * sp).add(right.multiplyScalar(fx * sp));
+      t.add(mv); c.position.add(mv);
+    }
+    if (rot) {
+      const off = c.position.clone().sub(t).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot * 1.4 * dt);
+      c.position.copy(t).add(off);
+    }
+    // keep the orbit centre on the map and resting on the ground, and the camera above the snow
+    const cx = clamp(t.x, 0, Terrain.W), cz = clamp(t.z, 0, Terrain.D);
+    if (cx !== t.x || cz !== t.z) { c.position.x += cx - t.x; c.position.z += cz - t.z; t.x = cx; t.z = cz; }
+    if (!this.fly) {
+      const dy = (Terrain.height(t.x, t.z) - t.y) * Math.min(1, dt * 6);
+      t.y += dy; c.position.y += dy;
+    }
+    const floor = Terrain.inside(c.position.x, c.position.z) ? Terrain.height(c.position.x, c.position.z) + 12 : -Infinity;
+    if (c.position.y < floor) c.position.y = floor;
+    // near plane follows the zoom so close-ups don't clip and far views don't z-fight
+    const near = clamp(dist / 400, 0.5, 20);
+    if (Math.abs(near - c.near) / c.near > 0.2) { c.near = near; c.updateProjectionMatrix(); }
+    // pylon handles keep a readable on-screen size
+    if (this.editGroup) for (const m of this.editGroup.children) if (m.userData.handle) m.scale.setScalar(Math.max(1, c.position.distanceTo(m.position) / 350));
+  },
+
   loop() {
     const now = performance.now(), dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
@@ -822,6 +1044,7 @@ const App = {
     this.sun.position.set(Math.cos(ang) * 10000 + Terrain.W / 2, Math.sin(ang) * 7000 + 2000, Terrain.D / 2 + 6000);
     this.sun.target.position.set(Terrain.W / 2, 0, Terrain.D / 2); this.sun.target.updateMatrixWorld();
     this.sun.intensity = 0.55 + 0.4 * Math.sin(Math.PI * f);
+    this.updateCamera(dt);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     Labels.update(this.camera, innerWidth, innerHeight);
