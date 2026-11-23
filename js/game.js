@@ -445,7 +445,7 @@ const Net = {
       if (t.mode && t.mode !== 'auto') o.mode = t.mode;
       if (t.lean) o.lean = Math.round(t.lean * 10) / 10;
       if (t.link) o.link = true;
-      if (t.type === 'y' && t.spread) o.spread = Math.round(t.spread);
+      if ((t.type === 'y' || t.type === 'twin') && t.spread) o.spread = Math.round(t.spread);
       return o;
     });
     this.group.remove(l.vis); Lifts.dispose(l.vis);

@@ -7,6 +7,7 @@ const PYLONS = {
   tube: { name: 'Classic tube', cost: 1, hMult: 1, desc: 'Slim single tube. Cheapest, standard height.' },
   lattice: { name: 'Lattice truss', cost: 1.5, hMult: 1.6, desc: 'Classic four-legged truss. Expensive, can be built much taller.' },
   portal: { name: 'Portal frame', cost: 1.3, hMult: 1.25, desc: 'Two legs and a cross beam, straddling wide ropes.' },
+  twin: { name: 'Twin-leg compression pylon', cost: 2.2, hMult: 1.1, perPylon: true, desc: 'Two box legs one behind the other along the line, under one long platform head with long sheave trains, wide walkways and a gantry over the ropes at each end: for big bends.' },
   y: { name: 'Y-pylon (two heads, one base)', cost: 1.8, hMult: 1, perPylon: true, desc: 'Two standard pylons branching from one foundation along the line, each with its own head: for big bends.' },
 };
 
@@ -38,7 +39,7 @@ const LIFT_TYPES = {
     desc: 'Fixed-grip double chair. Cheap but slow; long rides get cold.',
   },
   chair4: {
-    name: 'Detachable quad', icon: '⑃', kind: 'aerial', model: 'chair4', pylons: ['mgd', 'y', 'tube', 'lattice'],
+    name: 'Detachable quad', icon: '⑃', kind: 'aerial', model: 'chair4', pylons: ['mgd', 'y', 'twin', 'tube', 'lattice'],
     maxSpan: 350, maxTowerH: 45,
     speed: 5, interval: 6, seats: 4, minLen: 150, maxLen: 3000, minVert: 20,
     baseCost: 120000, perM: 70, towerCost: 9000, opBase: 3000, opPerM: 1.6, cold: 1,
@@ -46,7 +47,7 @@ const LIFT_TYPES = {
     desc: 'High-speed chairs that slow down in the stations. The workhorse lift.',
   },
   chair6: {
-    name: '6-seat bubble chair', icon: '⑆', kind: 'aerial', model: 'chair6', bubble: true, pylons: ['mgd', 'y', 'tube', 'lattice'],
+    name: '6-seat bubble chair', icon: '⑆', kind: 'aerial', model: 'chair6', bubble: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice'],
     maxSpan: 350, maxTowerH: 45,
     speed: 5, interval: 5.4, seats: 6, minLen: 150, maxLen: 3200, minVert: 20,
     baseCost: 200000, perM: 90, towerCost: 12000, opBase: 4500, opPerM: 2, cold: 0.3,
@@ -54,7 +55,7 @@ const LIFT_TYPES = {
     desc: 'High capacity, with weather bubbles and heated seats.',
   },
   gondola6: {
-    name: '6-person gondola', icon: '▢', kind: 'aerial', model: 'cabin6', enclosed: true, pylons: ['mgd', 'y', 'tube', 'lattice', 'portal'],
+    name: '6-person gondola', icon: '▢', kind: 'aerial', model: 'cabin6', enclosed: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal'],
     maxSpan: 500, maxTowerH: 60,
     speed: 5, interval: 9, seats: 6, minLen: 300, maxLen: 5000, minVert: 30,
     baseCost: 190000, perM: 100, towerCost: 12000, opBase: 4500, opPerM: 2, cold: 0,
@@ -62,7 +63,7 @@ const LIFT_TYPES = {
     desc: 'Compact enclosed cabins. A cheaper gondola for medium-length lifts.',
   },
   gondola: {
-    name: '8-person gondola', icon: '▣', kind: 'aerial', model: 'gondola', enclosed: true, pylons: ['mgd', 'y', 'tube', 'lattice', 'portal'],
+    name: '8-person gondola', icon: '▣', kind: 'aerial', model: 'gondola', enclosed: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal'],
     maxSpan: 600, maxTowerH: 65,
     speed: 6, interval: 10, seats: 8, minLen: 300, maxLen: 6000, minVert: 30,
     baseCost: 250000, perM: 120, towerCost: 15000, opBase: 6000, opPerM: 2.5, cold: 0,
@@ -70,7 +71,7 @@ const LIFT_TYPES = {
     desc: 'Enclosed cabins for long lifts from the valley. Warm and comfortable.',
   },
   gondola10: {
-    name: '10-person gondola', icon: '▤', kind: 'aerial', model: 'cabin10', enclosed: true, pylons: ['mgd', 'y', 'tube', 'lattice', 'portal'],
+    name: '10-person gondola', icon: '▤', kind: 'aerial', model: 'cabin10', enclosed: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal'],
     maxSpan: 650, maxTowerH: 70,
     speed: 6, interval: 10, seats: 10, minLen: 300, maxLen: 6500, minVert: 30,
     baseCost: 330000, perM: 140, towerCost: 18000, opBase: 7000, opPerM: 2.8, cold: 0,
@@ -78,7 +79,7 @@ const LIFT_TYPES = {
     desc: 'Big panoramic cabins with lots of glass. High capacity on long lines.',
   },
   funitel: {
-    name: 'Funitel', icon: '⧈', kind: 'aerial', model: 'funitel', enclosed: true, ropes: [-3.2, 3.2], pylons: ['portal', 'y', 'mgd', 'lattice'],
+    name: 'Funitel', icon: '⧈', kind: 'aerial', model: 'funitel', enclosed: true, ropes: [-3.2, 3.2], pylons: ['portal', 'y', 'twin', 'mgd', 'lattice'],
     maxSpan: 900, maxTowerH: 80,
     speed: 7, interval: 18, seats: 24, minLen: 500, maxLen: 4500, minVert: 50,
     baseCost: 900000, perM: 260, towerCost: 60000, opBase: 12000, opPerM: 4, cold: 0,
@@ -201,10 +202,11 @@ const Lifts = {
     if (custom) {
       for (const t of custom) {
         if (!(t.s > 0 && t.s < hl)) continue;
-        if (t.type === 'y') {
-          const sp2 = clamp(t.spread || 16, 8, 30) / 2, y = ground(t.s) + t.h;
-          prof.push({ s: clamp(t.s - sp2, 1, hl - 1), foot: t.s, y, type: 'y', ypair: 'a', link: true, wheels: t.wheels, mode: t.mode, src: t });
-          prof.push({ s: clamp(t.s + sp2, 1, hl - 1), foot: t.s, y, type: 'y', ypair: 'b', link: !!t.link, src: t });
+        if (t.type === 'y' || t.type === 'twin') {
+          const twin = t.type === 'twin', sp2 = (twin ? clamp(t.spread || 22, 12, 40) : clamp(t.spread || 16, 8, 30)) / 2, y = ground(t.s) + t.h;
+          const sa = clamp(t.s - sp2, 1, hl - 1), sb = clamp(t.s + sp2, 1, hl - 1);
+          prof.push({ s: sa, foot: twin ? sa : t.s, y, type: t.type, ypair: 'a', link: true, wheels: t.wheels, mode: t.mode, src: t });
+          prof.push({ s: sb, foot: twin ? sb : t.s, y, type: t.type, ypair: 'b', link: !!t.link, src: t });
           continue;
         }
         const lean = clamp(t.lean || 0, -MAX_LEAN * 1.5, MAX_LEAN * 1.5), head = clamp(t.s + t.h * Math.tan(lean * Math.PI / 180), 1, hl - 1);
@@ -418,7 +420,7 @@ const Lifts = {
     const lam = (c, o = {}) => new THREE.MeshLambertMaterial(Object.assign({ color: c }, o));
     this.M = {
       steel: lam(0x7b828b), dark: lam(0x2b2f35), rubber: lam(0x1a1c20), concrete: lam(0xb4afa6), roof: lam(0x3d434b),
-      wood: lam(0x9a6a3c), wall: lam(0xe9e4da), belt: lam(0x2a2d31), galv: lam(0xa9b1b8), grate: lam(0x6f767d),
+      wood: lam(0x9a6a3c), wall: lam(0xe9e4da), belt: lam(0x2a2d31), galv: lam(0xa9b1b8), grate: lam(0x6f767d), rust: lam(0x6e4a32),
       glass: lam(0x9fd0ff, { transparent: true, opacity: 0.35, depthWrite: false }),
       glassy: lam(0x9fc7ff, { transparent: true, opacity: 0.55 }),
       cable: new THREE.LineBasicMaterial({ color: 0x15171a }),
@@ -544,6 +546,33 @@ const Lifts = {
   },
   // Sheave battery of one train in the line frame FL (x across, y absolute height, z = metres along
   // the line): wheels on the rope curve, paired into bogies, bogies hung from a continuous balancer.
+  // Platform head of a twin-leg pylon: main beams under both sheave trains following their curve,
+  // cross beams, and a trapezoidal gantry over the ropes at each end.
+  _twinHead(parts, FL, l, t, reach) {
+    const T = l.T, beamDrop = t.mode === 'hold' ? -(2 * t.r + 1.6) : 2 * t.r + 1.2;
+    const yB = (s) => t.yAt(s) - beamDrop, s0 = t.s0 - 1.5, s1 = t.s1 + 1.5, n = Math.max(2, Math.ceil((s1 - s0) / 3));
+    const xo = reach + 1.6;
+    for (let k = 0; k < n; k++) {
+      const a = s0 + ((s1 - s0) * k) / n, b = s0 + ((s1 - s0) * (k + 1)) / n;
+      for (const x of [-reach + 0.4, reach - 0.4, -xo, xo]) this._strut(parts, 'galv', FL, [x, yB(a), a], [x, yB(b), b], Math.abs(x) > reach ? 0.45 : 1.0);
+      if (k % 2 === 0) this._strut(parts, 'galv', FL, [-xo, yB(a), a], [xo, yB(a), a], 0.55);       // cross beams
+      this._strut(parts, 'galv', FL, [-reach + 0.4, yB(a), a], [reach - 0.4, yB(b), b], 0.25);      // plan bracing
+    }
+    this._strut(parts, 'galv', FL, [-xo, yB(s1), s1], [xo, yB(s1), s1], 0.55);
+    // gantries over the ropes at both ends
+    for (const sg of [s0 + 1.2, s1 - 1.2]) {
+      const yb = yB(sg), clear = t.mode === 'hold' ? yb + 1 : t.yAt(sg) + (t.mode === 'both' ? 2 * t.r : 0) + 1.6;
+      const xt = Math.max(1.8, reach * 0.55), yt = Math.max(clear + 1.5, yb + 4.5);
+      for (const sx of [-1, 1]) {
+        this._strut(parts, 'galv', FL, [sx * xo, yb, sg], [sx * (xo - 0.4), clear, sg], 0.5);          // posts
+        this._strut(parts, 'galv', FL, [sx * (xo - 0.4), clear, sg], [sx * xt, yt, sg], 0.5);         // inclined sides
+        this._strut(parts, 'galv', FL, [sx * xo, yb, sg], [0, yt, sg], 0.2);                          // diagonals
+      }
+      this._strut(parts, 'galv', FL, [-xt - 0.6, yt, sg], [xt + 0.6, yt, sg], 0.55);                   // top beam
+      for (const sx of [-1, 1]) this._box(parts, 'galv', FL, 0.6, 0.6, 0.6, sx * (xt + 0.6), yt, sg);
+    }
+  },
+
   // flat plank from p1 to p2 (direction in the y-z plane), `w` wide across the line, `th` thick
   _plank(parts, key, F, p1, p2, w, th) {
     const dy = p2[1] - p1[1], dzz = p2[2] - p1[2], L = Math.hypot(dy, dzz);
@@ -555,9 +584,9 @@ const Lifts = {
   },
 
   // walkway beside a sheave train: follows the train's curve just below the wheels, outside the bogies
-  _walkway(parts, FL, l, t) {
+  _walkway(parts, FL, l, t, wide = false) {
     const T = l.T, ext = Math.max(0, ...(T.ropes || [0]).map(Math.abs));
-    const x = T.gauge + ext + 2.0, drop = t.mode === 'hold' ? 1.6 : 2 * t.r + 0.55;
+    const x = T.gauge + ext + (wide ? 2.4 : 2.0), drop = t.mode === 'hold' ? 1.6 : 2 * t.r + (wide ? 0.95 : 0.55);
     const yAt = (s) => t.yAt(s) - drop;
     t.walk = { x, yAt };
     const s0 = t.s0 - 2, s1 = t.s1 + 2, n = Math.max(2, Math.ceil((s1 - s0) / 2.5));
@@ -566,7 +595,7 @@ const Lifts = {
       let prev = null, prevPost = null;
       for (let k = 0; k <= n; k++) {
         const s = s0 + ((s1 - s0) * k) / n, y = yAt(s), pt = [X, y, s];
-        if (prev) this._plank(parts, 'grate', FL, prev, pt, 1.4, 0.14);
+        if (prev) this._plank(parts, 'grate', FL, prev, pt, wide ? 2.4 : 1.4, 0.14);
         const post = [X + sgn * 0.68, y + 1.1, s];
         if (k % 1 === 0) this._strut(parts, 'galv', FL, [X + sgn * 0.68, y, s], post, 0.09);       // railing post
         if (prevPost) {
@@ -676,7 +705,25 @@ const Lifts = {
         parts.add('galv', ring, M);
       }
     };
-    if (p.ypair) {
+    if (p.ypair && p.type === 'twin') {
+      // Twin-leg compression pylon: a tapered box leg under each head, flared into the platform,
+      // on a lattice anchor frame; the platform + gantries are drawn once per train (twinHead)
+      const top = H + 0.2, w0 = 1.25, w1 = 1.75;
+      const leg = new THREE.CylinderGeometry(w1, w0, top - 1.2, 4); leg.rotateY(Math.PI / 4); leg.translate(0, 1.2 + (top - 1.2) / 2, 0);
+      parts.add('galv', leg, F);
+      const cap = new THREE.CylinderGeometry(2.9, w1, 2.4, 4); cap.rotateY(Math.PI / 4); cap.translate(0, top - 1.2, 0); parts.add('galv', cap, F);   // flare into the head
+      for (const sx of [-1, 1]) this._box(parts, 'dark', F, 0.06, top - 3, 0.06, sx * 0.62, top / 2, 1.0);                       // panel seams
+      this._box(parts, 'dark', F, 0.06, top - 3, 0.06, 0, top / 2, 1.24);
+      // anchor frame at the base
+      this._box(parts, 'concrete', F, 5.5, 1.2, 5.5, 0, -0.2, 0);
+      this._box(parts, 'rust', F, 3.6, 0.5, 3.6, 0, 0.6, 0);
+      for (const [gx, gz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        this._strut(parts, 'rust', F, [gx * 1.7, 0.8, gz * 1.7], [gx * 0.9, 3.4, gz * 0.9], 0.25);
+        this._strut(parts, 'rust', F, [gx * 1.7 + gz * 1.2, 0.8, gz * 1.7 + gx * 1.2], [gx * 0.9, 2.6, gz * 0.9], 0.18);
+        this._strut(parts, 'rust', F, [gx * 1.7 - gz * 1.2, 0.8, gz * 1.7 - gx * 1.2], [gx * 0.9, 2.6, gz * 0.9], 0.18);
+      }
+      if (p.ypair === 'a') this._twinHead(parts, FL, l, t, reach);
+    } else if (p.ypair) {
       // Y-pylon: one foundation and trunk, two standard pylon branches splayed along the line, each with a head
       const hf = Math.max(3, Math.min(H * 0.3, 14)), rb = 1.5 + H * 0.018;
       if (p.ypair === 'a') {
@@ -701,7 +748,7 @@ const Lifts = {
     } else if (style === 'lattice' || style === 'portal' || style === 'tube') {
       this._box(parts, 'concrete', F, 5, 1.8, 5, 0, 0.1, 0);
     }
-    if (p.ypair || style === 'mgd' || (style === 'lattice' && !surface)) {
+    if ((p.ypair && p.type !== 'twin') || style === 'mgd' || (style === 'lattice' && !surface)) {
       // brackets from the crossarm ends out to the walkways beside the sheave trains
       for (const sgn of surface ? [-1] : [1, -1]) {
         const w = t.walk;
@@ -884,9 +931,9 @@ const Lifts = {
     const FL = new THREE.Matrix4().makeRotationY(rotY).premultiply(new THREE.Matrix4().makeTranslation(a.x, 0, a.z));
     for (const t of P.trains) {
       this._battery(parts, FL, l, t);
-      const st = P.prof[t.i].ypair ? 'y' : this.pylonType(l, P.prof[t.i]);
+      const st = P.prof[t.i].ypair ? P.prof[t.i].type : this.pylonType(l, P.prof[t.i]);
       t.walk = null;
-      if ((st === 'mgd' || st === 'y' || st === 'lattice') && T.kind !== 'surface') this._walkway(parts, FL, l, t);
+      if (['mgd', 'y', 'twin', 'lattice'].includes(st) && T.kind !== 'surface') this._walkway(parts, FL, l, t, st === 'twin');
     }
     for (let i = 1; i < prof.length - 1; i++) this.pylon(parts, l, P, i, rotY, FL);
     if (below) this.junction(parts, l, below, a); else this.station(parts, l, a, 0, true, rotY, P);

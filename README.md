@@ -48,6 +48,7 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
    **Linked sheaves, lean and Y-pylons:**
    - Tick **🔗 Link sheaves with next pylon** to join up to 4 pylons (at most 45 m apart) into one long, evenly curved wheel battery, which spreads a big bend over all their wheels. The heads of linked pylons follow the rope curve. The automatic layout does this by itself at sharp crests.
    - Pylons can **lean** up to ±30° along the line, and **Align with rope** leans one along the combined pull of its ropes.
+   - A **twin-leg compression pylon** (chosen per pylon) has two tapered box legs one behind the other along the line, flared into one long platform head on lattice anchor frames, with long sheave trains, wide grated walkways and a trapezoidal gantry over the ropes at each end. Spread 12–40 m.
    - A **Y-pylon** (chosen per pylon) is two standard pylons branching from one foundation along the line, each with its own head; the two heads share one sheave battery, for big bends. Adjust the spread between the heads (8–30 m).
 
    **Modern MGD tube** (default for detachable chairs and gondolas, based on modern 8-person gondola pylons): a conical galvanised tube on a flange plate, a box crossarm with a braced trapezoidal lattice truss over the ropes (as on the Penkenbahn pylons in Mayrhofen), walkways that follow the sheave trains, sheave trains of paired-wheel bogies on balancer beams, catwalks with railings, a caged ladder and a maintenance gantry.

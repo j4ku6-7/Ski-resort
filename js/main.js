@@ -780,11 +780,12 @@ const App = {
       const middle = tr && tr.linked && inf.pi > tr.i && inf.pi < tr.j;
       r.disabled = !!middle;
       $('#pp-h-note').textContent = middle ? 'This pylon sits inside a linked sheave train; its head follows the rope curve.' : '';
-      const isY = sel.type === 'y';
+      const isY = sel.type === 'y' || sel.type === 'twin', twin = sel.type === 'twin';
       $('#pp-spread-row').hidden = !isY;
       $('#pp-lean-row').hidden = isY; $('#pp-align').hidden = isY;
-      $('#pp-spread').value = sel.spread || 16;
-      $('#pp-spread-v').textContent = `${Math.round(sel.spread || 16)} m between the heads`;
+      $('#pp-spread').min = twin ? 12 : 8; $('#pp-spread').max = twin ? 40 : 30;
+      $('#pp-spread').value = sel.spread || (twin ? 22 : 16);
+      $('#pp-spread-v').textContent = `${Math.round(sel.spread || (twin ? 22 : 16))} m between the ${twin ? 'legs' : 'heads'}`;
       $('#pp-lean').value = sel.lean || 0;
       $('#pp-lean-v').textContent = `${(sel.lean || 0).toFixed(0)}°${sel.lean ? (sel.lean > 0 ? ' uphill' : ' downhill') : ' (upright)'}`;
       $('#pp-link').checked = !!sel.link;
@@ -875,6 +876,10 @@ const App = {
       ctx.beginPath();
       if (style === 'lattice') { ctx.moveTo(X - w, sy(g)); ctx.lineTo(XH, sy(topY)); ctx.lineTo(X + w, sy(g)); }
       else if (style === 'portal') { ctx.moveTo(X - 4, sy(g)); ctx.lineTo(XH - 3, sy(topY)); ctx.lineTo(XH + 3, sy(topY)); ctx.lineTo(X + 4, sy(g)); }
+      else if (style === 'twin' && inf && inf.heads.length > 1) {
+        for (const h of inf.heads) { ctx.moveTo(sx(h.s), sy(P.ground(h.s))); ctx.lineTo(sx(h.s), sy(h.y)); }
+        ctx.moveTo(sx(inf.heads[0].s) - 6, sy(inf.heads[0].y)); ctx.lineTo(sx(inf.heads[1].s) + 6, sy(inf.heads[1].y));
+      }
       else if (style === 'y' && inf && inf.heads.length > 1) {
         const fy = g + Math.max(3, Math.min((topY - g) * 0.3, 14));
         ctx.moveTo(X, sy(g)); ctx.lineTo(X, sy(fy));
