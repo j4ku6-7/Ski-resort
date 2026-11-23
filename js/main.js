@@ -48,7 +48,7 @@ const UI = {
 
 const App = {
   tool: 'select', draft: null, hover: null, preview: null, liftType: 'chair4', panelLift: null,
-  grading: false, holdAngle: false, gradeDeg: 13, manualPylons: false, edit: null, planMode: false,
+  grading: false, holdAngle: false, gradeDeg: 13, manualPylons: false, edit: null, planMode: false, pylonFocus: true,
 
   init() {
     const menu = $('#resorts');
@@ -239,6 +239,7 @@ const App = {
         }
         if ((e.key === 'Delete' || e.key === 'Backspace') && ed.sel != null) { this.removePylon(); e.preventDefault(); return; }
         if (e.key === 'Escape') { ed.sel = null; this.applyPylons(); return; }
+        if (e.key === '[' || e.key === ']') { this.stepPylon(e.key === ']' ? 1 : -1); e.preventDefault(); return; }
         if (e.key === 'Enter') { this.finishPylons(); return; }
       }
       const keys = { '1': 'select', '2': 'lift', '3': 'run', '4': 'cut', '5': 'bulldoze' };
@@ -456,10 +457,12 @@ const App = {
       return;
     } else if (t === 'pylons' && this.edit) {
       const e = this.edit;
-      if (e.hover != null) e.sel = e.hover;
+      if (e.hover != null) { this.selectPylon(e.hover); return; }
       else if (e.ghost != null) {
         e.towers.push({ s: e.ghost, h: e.l.T.towerH });
-        e.sel = e.towers.length - 1; e.hover = e.sel; e.ghost = null;
+        e.hover = null; e.ghost = null;
+        this.selectPylon(e.towers.length - 1);
+        return;
       }
       this.applyPylons();
       return;
@@ -766,9 +769,11 @@ const App = {
       : '<p class="ok">✓ Passes the safety inspection</p>';
     const sel = e.sel != null ? e.towers[e.sel] : null;
     $('#pp-sel').hidden = !sel;
+    if (!sel) $('#pp-count-of').textContent = e.towers.length ? `${e.towers.length} pylons · ▶ to start` : 'no pylons yet';
     if (sel) {
       const rank = this.pylonOrder ? this.pylonOrder.indexOf(e.sel) + 1 : e.sel + 1;
       $('#pp-sel-name').textContent = `Pylon ${rank} · ${Math.round(sel.s)} m along the line`;
+      $('#pp-count-of').textContent = `${rank} of ${e.towers.length}`;
       const style = Lifts.pylonType(l, sel), maxH = Lifts.maxPylonH(T, style);
       if (sel.h > maxH) sel.h = maxH;
       const r = $('#pp-h'); r.min = this.minPylon(T); r.max = maxH; r.value = sel.h;
@@ -955,13 +960,47 @@ const App = {
       let i = near(p);
       if (i == null && p.s > 12 && p.s < p.v.hl - 12) { e.towers.push({ s: p.s, h: Math.round(p.h) }); i = e.towers.length - 1; }
       if (i == null) return;
+      const changed = e.sel !== i;
       e.sel = i; this.profDrag = i; this.profGhost = null;
+      if (changed) this.focusPylon(i);
       cv.setPointerCapture(ev.pointerId);
       this.applyPylons();
     });
     cv.addEventListener('pointerup', () => { if (this.profDrag != null) { this.profDrag = null; this.profScale = null; this.applyPylons(); } });
     cv.addEventListener('contextmenu', (ev) => ev.preventDefault());
     addEventListener('resize', () => this.drawProfile());
+  },
+
+  // select pylon i (draft index), refresh, and fly the camera to it
+  selectPylon(i, focus = true) {
+    const e = this.edit;
+    if (!e || i == null || !e.towers[i]) return;
+    e.sel = i;
+    this.applyPylons();
+    if (focus) this.focusPylon(i);
+  },
+
+  // side view of one pylon, framed to its height, from whichever side of the line the camera is on
+  focusPylon(i) {
+    const e = this.edit;
+    if (!e || !this.pylonFocus) return;
+    const l = e.l, t = e.towers[i], inf = this.pylonInfo(i);
+    const hs = inf ? inf.head : t.s, x = l.a.x + l.dir.ux * hs, z = l.a.z + l.dir.uz * hs;
+    const g = Terrain.height(l.a.x + l.dir.ux * t.s, l.a.z + l.dir.uz * t.s), top = inf ? inf.y : g + t.h;
+    const span = inf && inf.heads.length > 1 ? Math.abs(inf.heads[1].s - inf.heads[0].s) : 0;
+    const side = Math.sign((this.camera.position.x - x) * l.dir.px + (this.camera.position.z - z) * l.dir.pz) || 1;
+    const dist = Math.max(70, (top - g) * 2.4 + span * 1.2);
+    this.flyTo({ x, y: g + (top - g) * 0.6, z }, dist, { x: l.dir.px * side + l.dir.ux * 0.35, y: 0.32, z: l.dir.pz * side + l.dir.uz * 0.35 });
+  },
+
+  // previous / next pylon along the line
+  stepPylon(dir) {
+    const e = this.edit;
+    if (!e || !e.towers.length) return;
+    const order = e.towers.map((_, i) => i).sort((a, b) => e.towers[a].s - e.towers[b].s);
+    const k = e.sel == null ? (dir > 0 ? -1 : order.length) : order.indexOf(e.sel);
+    const next = order[clamp(k + dir, 0, order.length - 1)];
+    if (next !== e.sel) this.selectPylon(next);
   },
 
   removePylon() {
@@ -1006,6 +1045,10 @@ const App = {
   bindPylonPanel() {
     $('#pp-h').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].h = +ev.target.value; this.applyPylons(); } };
     $('#pp-del').onclick = () => this.removePylon();
+    $('#pp-prev').onclick = () => this.stepPylon(-1);
+    $('#pp-next').onclick = () => this.stepPylon(1);
+    $('#pp-focus').checked = this.pylonFocus;
+    $('#pp-focus').onchange = (ev) => { this.pylonFocus = ev.target.checked; if (this.pylonFocus && this.edit && this.edit.sel != null) this.focusPylon(this.edit.sel); };
     $('#pp-spread').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].spread = +ev.target.value; this.applyPylons(); } };
     $('#pp-lean').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].lean = +ev.target.value || 0; if (!e.towers[e.sel].lean) delete e.towers[e.sel].lean; this.applyPylons(); } };
     $('#pp-align').onclick = () => {

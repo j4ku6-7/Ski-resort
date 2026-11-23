@@ -188,3 +188,8 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 #lp-colors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #cfd8e3; padding: 0; }
 .swatch.on { box-shadow: 0 0 0 2px #1f6feb; }
+
+.pp-nav { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.pp-nav button { border: 0; background: #1f6feb; color: #fff; border-radius: 8px; width: 38px; height: 32px; font-size: 14px; }
+.pp-nav #pp-count-of { flex: 1; text-align: center; font-size: 13px; }
+.pp-nav .toggle { margin: 0; font-weight: 500; }

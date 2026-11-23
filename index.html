@@ -106,6 +106,12 @@
   <div id="pylon-panel" class="side-panel" hidden>
     <b id="pp-title"></b>
     <p class="dim small">More wheels spread the rope's bend, and each wheel may take at most 4.5°. Point at the lift line and click to add a pylon. Drag a pylon to move it, use + / − to change its height, and Del to remove it. The rope shows green where it's fine, orange where it's tight, red where it hits the snow, and yellow where it's too high.</p>
+    <div class="pp-nav">
+      <button id="pp-prev" title="Previous pylon ( [ )">◀</button>
+      <span id="pp-count-of" class="dim">select a pylon</span>
+      <button id="pp-next" title="Next pylon ( ] )">▶</button>
+      <label class="toggle small"><input type="checkbox" id="pp-focus"> Auto-focus</label>
+    </div>
     <div id="pp-sel" hidden>
       <div class="row"><span>Selected</span><b id="pp-sel-name"></b></div>
       <label class="slider">Height <input type="range" id="pp-h" step="1"><span id="pp-h-v"></span></label>
