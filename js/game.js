@@ -4,7 +4,8 @@
 const TIME_SCALE = 30;                 // world seconds per real second at 1x
 const DAY_START = 8.5 * 3600, LAST_ARRIVAL = 14.5 * 3600, DAY_END = 16.5 * 3600;
 const SNAP = 70, RUN_WIDTH = 34, RUN_COST_PER_M = 25, RUN_OP_PER_M = 2;
-const FIXED_OP = 3000;                 // lodges, staff, ticket office per day
+const FIXED_OP = 3000;
+const TREE_COST = 150;                 // felling + hauling one tree                 // lodges, staff, ticket office per day
 const MAX_DEBT = 100000, DEBT_DAYS = 3, MIN_REP = 15;
 const TICKET = 38, START_MONEY = 650000, MAX_SKIERS = 1500;
 
@@ -52,6 +53,34 @@ class Path {
   }
 }
 
+// Centripetal Catmull-Rom through the clicked/drawn points, resampled every `step` metres.
+function smoothLine(points, step = 8) {
+  const out = [{ x: points[0].x, z: points[0].z }];
+  const n = points.length;
+  const P = (i) => {
+    if (i < 0) return { x: 2 * points[0].x - points[1].x, z: 2 * points[0].z - points[1].z };
+    if (i >= n) return { x: 2 * points[n - 1].x - points[n - 2].x, z: 2 * points[n - 1].z - points[n - 2].z };
+    return points[i];
+  };
+  const kd = (a, b) => Math.sqrt(Math.hypot(b.x - a.x, b.z - a.z)) || 1e-3;
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    const t1 = kd(p0, p1), t2 = t1 + kd(p1, p2), t3 = t2 + kd(p2, p3);
+    const L = (A, B, ta, tb, u) => ({ x: (A.x * (tb - u) + B.x * (u - ta)) / (tb - ta), z: (A.z * (tb - u) + B.z * (u - ta)) / (tb - ta) });
+    const segs = Math.max(1, Math.ceil(Math.hypot(p2.x - p1.x, p2.z - p1.z) / step));
+    for (let k = 1; k <= segs; k++) {
+      const u = t1 + ((t2 - t1) * k) / segs;
+      const A1 = L(p0, p1, 0, t1, u), A2 = L(p1, p2, t1, t2, u), A3 = L(p2, p3, t2, t3, u);
+      const B1 = L(A1, A2, 0, t2, u), B2 = L(A2, A3, t1, t3, u);
+      out.push(L(B1, B2, t1, t2, u));
+    }
+  }
+  return out;
+}
+
+const GRADE_COLORS = [0x2f7de1, 0xe0393e, 0x18181c, 0xc04dff, 0xffa31a]; // blue, red, black, too steep, uphill
+function gradeClass(g) { return g < -0.06 ? 4 : g <= 0.25 ? 0 : g <= 0.4 ? 1 : g <= 0.9 ? 2 : 3; }
+
 // ---------- shared geometry / materials ----------
 const GEO = {}, MAT = {};
 function initAssets() {
@@ -69,8 +98,9 @@ function initAssets() {
   for (const k in LIFT_TYPES) MAT.station[k] = new THREE.MeshLambertMaterial({ color: LIFT_TYPES[k].station });
 }
 
-function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH) {
-  const n = pts.length, across = 5, pos = new Float32Array(n * across * 3);
+function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH, colors = null) {
+  const n = pts.length, across = 7, pos = new Float32Array(n * across * 3);
+  const col = colors ? new Float32Array(n * across * 3) : null, tc = new THREE.Color();
   for (let i = 0; i < n; i++) {
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
     let dx = b.x - a.x, dz = b.z - a.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
@@ -78,6 +108,7 @@ function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH) {
       const o = (c / (across - 1) - 0.5) * width;
       const x = pts[i].x - dz * o, z = pts[i].z + dx * o, k = (i * across + c) * 3;
       pos[k] = x; pos[k + 1] = Terrain.height(x, z) + 2; pos[k + 2] = z;
+      if (col) { tc.set(colors[i]); col[k] = tc.r; col[k + 1] = tc.g; col[k + 2] = tc.b; }
     }
   }
   const idx = [];
@@ -87,9 +118,10 @@ function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH) {
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  if (col) geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   geo.setIndex(idx);
   const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity, depthWrite: false,
+    color: col ? 0xffffff : color, vertexColors: !!col, transparent: true, opacity, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4, side: THREE.DoubleSide,
   }));
   mesh.renderOrder = 2;
@@ -203,26 +235,27 @@ const Net = {
     let a = p, b = q, ya = this.pointY(p), yb = this.pointY(q);
     if (yb < ya) { [a, b] = [b, a]; [ya, yb] = [yb, ya]; }
     const hl = Math.hypot(b.x - a.x, b.z - a.z), vert = yb - ya, len = Math.hypot(hl, vert);
-    const cost = T.baseCost + T.perM * len;
+    const trees = Terrain.treesNear([a, b], T.gauge + 8).length;
+    const build = T.baseCost + T.perM * len, cost = build + trees * TREE_COST;
     let msg = null;
     if (a.node && a.node === b.node) msg = 'Both ends are on the same spot';
     else if (hl < 80) msg = 'Too short';
     else if (len > T.maxLen) msg = `Too long — a ${T.name.toLowerCase()} can be at most ${fmt(T.maxLen)} m`;
     else if (vert < 20) msg = 'A lift needs at least 20 m of climb';
     else if (!free && cost > Game.money) msg = 'Not enough money';
-    return { ok: !msg, msg, a, b, hl, len, vert, cost, T, type };
+    return { ok: !msg, msg, a, b, hl, len, vert, cost, build, trees, T, type };
   },
 
   buildLift(plan, free = false) {
     const A = this.pointNode(plan.a), B = this.pointNode(plan.b), T = plan.T;
     const l = { kind: 'lift', id: this.seq.lift++, type: plan.type, T, a: A, b: B, len: plan.len, vert: plan.vert,
-                cost: plan.cost, queue: [], carriers: [], clock: 0, next: T.interval };
+                cost: plan.build, queue: [], carriers: [], clock: 0, next: T.interval };
     l.name = `L${l.id}`;
     buildLiftVisual(l);
     this.group.add(l.vis);
     l.label = Labels.add('', 'queue', { x: A.x, y: A.y + T.towerH + 26, z: A.z });
     A.lifts.push(l); B.lifts.push(l); this.lifts.push(l);
-    Terrain.clearTrees([A, B], 14);
+    if (!free) Terrain.clearTrees([A, B], T.gauge + 8);
     if (!free) Game.spend(plan.cost);
     this.version++;
     return l;
@@ -230,14 +263,7 @@ const Net = {
 
   runPlan(points, free = false) {
     if (points.length < 2) return { ok: false, msg: 'Click more points down the slope' };
-    const dense = [];
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i], b = points[i + 1], L = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(L / 8));
-      for (let k = i ? 1 : 0; k <= n; k++) {
-        const x = a.x + ((b.x - a.x) * k) / n, z = a.z + ((b.z - a.z) * k) / n;
-        dense.push({ x, y: Terrain.height(x, z), z });
-      }
-    }
+    const dense = smoothLine(points).map((p) => ({ x: p.x, y: Terrain.height(p.x, p.z), z: p.z }));
     const hc = [0];
     for (let i = 1; i < dense.length; i++) hc.push(hc[i - 1] + Math.hypot(dense[i].x - dense[i - 1].x, dense[i].z - dense[i - 1].z));
     let maxG = 0, j = 0;
@@ -249,29 +275,41 @@ const Net = {
     // skiers coast over small bumps; reject only a sustained climb
     let low = dense[0].y, climb = 0;
     for (const p of dense) { low = Math.min(low, p.y); climb = Math.max(climb, p.y - low); if (p.y < low + 0.01) low = p.y; }
+    // local grade around each point, for the colour-coded preview
+    const colors = dense.map((_, i) => {
+      const a = Math.max(0, i - 3), b = Math.min(dense.length - 1, i + 3), h = hc[b] - hc[a] || 1;
+      return GRADE_COLORS[gradeClass((dense[a].y - dense[b].y) / h)];
+    });
+    let steepAt = 0;
+    for (let i = 0, j = 0, best = -1; i < dense.length; i++) {
+      while (j < dense.length - 1 && hc[j] - hc[i] < 48) j++;
+      const g = hc[j] - hc[i] > 20 ? (dense[i].y - dense[j].y) / (hc[j] - hc[i]) : -1;
+      if (g > best) { best = g; steepAt = (i + j) >> 1; }
+    }
+    const trees = Terrain.treesNear(dense, RUN_WIDTH * 0.65).length;
     const path = new Path(dense), len = path.length;
     const drop = dense[0].y - dense[dense.length - 1].y;
     const diff = maxG <= 0.25 ? 0 : maxG <= 0.4 ? 1 : 2;
-    const cost = len * RUN_COST_PER_M;
+    const build = len * RUN_COST_PER_M, cost = build + trees * TREE_COST;
     let msg = null;
     if (drop < 25) msg = 'A run has to go downhill';
     else if (climb > 10) msg = `This line climbs ${Math.round(climb)} m uphill — follow the slope down`;
     else if (maxG > 0.9) msg = 'Too steep to groom (over 42°)';
     else if (!free && cost > Game.money) msg = 'Not enough money';
-    return { ok: !msg, msg, dense, path, len, drop, maxG, diff, cost, points };
+    return { ok: !msg, msg, dense, path, len, drop, maxG, diff, cost, build, trees, colors, steepAt, points };
   },
 
   buildRun(plan, free = false) {
     const A = this.pointNode(plan.points[0]), B = this.pointNode(plan.points[plan.points.length - 1]);
     const r = { kind: 'run', id: this.seq.run++, a: A, b: B, diff: plan.diff, path: plan.path, len: plan.len,
-                drop: plan.drop, maxG: plan.maxG, cost: plan.cost, points: plan.points.map((p) => ({ x: p.x, z: p.z })) };
+                drop: plan.drop, maxG: plan.maxG, cost: plan.build, points: plan.points.map((p) => ({ x: p.x, z: p.z })) };
     r.name = `Run ${r.id}`;
     r.vis = makeRibbon(plan.dense, DIFF[r.diff].color);
     this.group.add(r.vis);
     const s = plan.dense[Math.min(6, plan.dense.length - 1)];
     r.label = Labels.add(String(r.id), `run run-${r.diff}`, { x: s.x, y: s.y + 22, z: s.z });
     A.runs.push(r); B.runs.push(r); this.runs.push(r);
-    Terrain.clearTrees(plan.dense, RUN_WIDTH * 0.65);
+    if (!free) Terrain.clearTrees(plan.dense, RUN_WIDTH * 0.65);
     this.version++;
     if (free) return r;
     Game.spend(plan.cost);
@@ -344,12 +382,25 @@ const Game = {
 
   get open() { return Net.lifts.length > 0 && Net.runs.length > 0; },
 
+  forestLeft() { const t = Terrain.trees; return t ? t.left / t.total : 1; },
+  // guests come for the views: clear more than 10 % of the forest and demand drops
+  scenery() { return 1 - clamp(1 - this.forestLeft() - 0.1, 0, 0.5) * 1.2; },
+
+  cutAt(x, z, r) {
+    const idx = Terrain.treesNear([{ x, z }], r);
+    const n = Math.min(idx.length, Math.floor(Math.max(0, this.money) / TREE_COST));
+    if (!n) return 0;
+    Terrain.cutTrees(idx.slice(0, n));
+    this.spend(n * TREE_COST);
+    return n;
+  },
+
   liftCapacity() { return Net.lifts.reduce((s, l) => s + (l.T.seats / l.T.interval) * 3600, 0); },
 
   demandPerHour() {
     let km = 0; const kinds = new Set();
     for (const r of Net.runs) { km += r.len / 1000; kinds.add(r.diff); }
-    const d = (30 + km * 55) * (0.35 + (1.3 * this.rep) / 100) * (0.7 + 0.15 * kinds.size);
+    const d = (30 + km * 55) * (0.35 + (1.3 * this.rep) / 100) * (0.7 + 0.15 * kinds.size) * this.scenery();
     const h = this.time / 3600, tod = h < 11 ? 1.5 : h < 13 ? 0.9 : 0.4;
     return Math.min(d * tod, this.liftCapacity() * 0.35);
   },
@@ -531,6 +582,7 @@ const Game = {
       bases: Net.nodes.filter((n) => n.base).map((n) => ({ id: n.id, name: n.name })),
       lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id })),
       runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points })),
+      trees: Terrain.treeMask(),
     };
   },
 
@@ -550,6 +602,7 @@ const Game = {
       if (plan.dense) Net.buildRun(plan, true);
     }
     Net.pruneNodes();
+    if (d.trees) Terrain.applyTreeMask(d.trees);
     Object.assign(this, { money: d.money, day: d.day, time: d.time, rep: d.rep, debtDays: d.debtDays || 0 });
     if (d.stats) this.stats = Object.assign(this.stats, d.stats);
     if (this.time >= DAY_END) this.nextDay();

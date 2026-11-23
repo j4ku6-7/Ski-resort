@@ -84,9 +84,35 @@ const Terrain = {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    this.baseColors = col;
+    this.slopeColors = this.makeSlopeColors(col);
+    this.mesh = null;
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     geo.computeVertexNormals();
-    return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    this.mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    return this.mesh;
+  },
+
+  // Piste-grade overlay: blue <= 25 %, red <= 40 %, black <= 90 %, purple = too steep.
+  makeSlopeColors(base) {
+    const { nx, nz, cell: c, H } = this, out = new Float32Array(base.length);
+    const at = (i, j) => H[Math.min(nz - 1, Math.max(0, j)) * nx + Math.min(nx - 1, Math.max(0, i))];
+    const tint = [[0.55, 0.72, 1.0], [1.0, 0.62, 0.6], [0.38, 0.38, 0.42], [0.62, 0.35, 0.75]];
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      const g = Math.hypot(at(i + 2, j) - at(i - 2, j), at(i, j + 2) - at(i, j - 2)) / (4 * c);
+      const t = tint[g <= 0.25 ? 0 : g <= 0.4 ? 1 : g <= 0.9 ? 2 : 3];
+      for (let q = 0; q < 3; q++) out[3 * k + q] = base[3 * k + q] * 0.35 + t[q] * 0.65;
+    }
+    return out;
+  },
+
+  showSlopeMap(on) {
+    if (!this.mesh || this.slopeOn === on) return;
+    this.slopeOn = on;
+    const attr = this.mesh.geometry.attributes.color;
+    attr.array.set(on ? this.slopeColors : this.baseColors);
+    attr.needsUpdate = true;
   },
 
   // Earth-coloured walls around the map so it reads like a diorama block.
@@ -131,30 +157,66 @@ const Terrain = {
       mesh.setMatrixAt(i, m);
       mesh.setColorAt(i, tmp.copy(colA).lerp(colB, rnd()));
     }
-    this.trees = { mesh, pts, alive: new Uint8Array(count).fill(1) };
+    const B = 100, bw = Math.ceil(this.W / B) + 1, buckets = new Map();
+    for (let i = 0; i < count; i++) {
+      const key = Math.floor(pts[3 * i + 1] / B) * bw + Math.floor(pts[3 * i] / B);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(i);
+    }
+    this.trees = { mesh, pts, alive: new Uint8Array(count).fill(1), total: count, left: count, B, bw, buckets };
     return mesh;
   },
 
-  // Cut forest along a built run / lift line.
-  clearTrees(line, radius) {
-    if (!this.trees) return;
-    const { mesh, pts, alive } = this.trees;
-    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-    for (const p of line) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
-    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
-    let changed = false;
-    for (let i = 0; i < alive.length; i++) {
-      if (!alive[i]) continue;
-      const x = pts[3 * i], z = pts[3 * i + 1];
-      if (x < x0 - radius || x > x1 + radius || z < z0 - radius || z > z1 + radius) continue;
-      for (let k = 0; k < line.length - 1; k++) {
-        if (segDist(x, z, line[k].x, line[k].z, line[k + 1].x, line[k + 1].z) < radius) {
-          alive[i] = 0; mesh.setMatrixAt(i, zero); changed = true; break;
+  // indices of standing trees within `radius` of a polyline (a single point works too)
+  treesNear(line, radius) {
+    const t = this.trees, found = new Set();
+    if (!t) return [];
+    const { B, bw, buckets, pts, alive } = t, step = Math.min(8, radius / 2), r2 = radius * radius;
+    const probe = (x, z) => {
+      for (let bz = Math.floor((z - radius) / B); bz <= Math.floor((z + radius) / B); bz++) {
+        for (let bx = Math.floor((x - radius) / B); bx <= Math.floor((x + radius) / B); bx++) {
+          const list = buckets.get(bz * bw + bx);
+          if (list) for (const i of list) {
+            if (!alive[i]) continue;
+            const dx = pts[3 * i] - x, dz = pts[3 * i + 1] - z;
+            if (dx * dx + dz * dz < r2) found.add(i);
+          }
         }
       }
+    };
+    probe(line[0].x, line[0].z);
+    for (let k = 0; k < line.length - 1; k++) {
+      const a = line[k], b = line[k + 1], n = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / step);
+      for (let j = 1; j <= n; j++) probe(a.x + ((b.x - a.x) * j) / n, a.z + ((b.z - a.z) * j) / n);
     }
-    if (changed) mesh.instanceMatrix.needsUpdate = true;
+    return [...found];
   },
+
+  cutTrees(indices) {
+    const t = this.trees;
+    if (!t || !indices.length) return 0;
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    let n = 0;
+    for (const i of indices) if (t.alive[i]) { t.alive[i] = 0; t.mesh.setMatrixAt(i, zero); n++; }
+    t.left -= n;
+    t.mesh.instanceMatrix.needsUpdate = true;
+    return n;
+  },
+
+  // 1 bit per tree, base64 — trees are generated from a fixed seed, so this restores them exactly
+  treeMask() {
+    const a = this.trees.alive, bytes = new Uint8Array(Math.ceil(a.length / 8));
+    for (let i = 0; i < a.length; i++) if (!a[i]) bytes[i >> 3] |= 1 << (i & 7);
+    let s = ''; for (const b of bytes) s += String.fromCharCode(b);
+    return btoa(s);
+  },
+  applyTreeMask(mask) {
+    const bin = atob(mask), cut = [];
+    for (let i = 0; i < this.trees.alive.length; i++) if (bin.charCodeAt(i >> 3) & (1 << (i & 7))) cut.push(i);
+    this.cutTrees(cut);
+  },
+
+  clearTrees(line, radius) { return this.cutTrees(this.treesNear(line, radius)); },
 };
 
 function segDist(px, pz, ax, az, bx, bz) {

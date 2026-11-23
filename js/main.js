@@ -128,6 +128,14 @@ const App = {
       new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false }));
     this.liftLine.renderOrder = 11; this.liftLine.visible = false; scene.add(this.liftLine);
 
+    this.brush = 45;
+    this.brushRing = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 48).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xffc94d, depthTest: false, transparent: true, opacity: 0.9 }));
+    this.brushRing.scale.setScalar(this.brush); this.brushRing.renderOrder = 10; this.brushRing.visible = false;
+    scene.add(this.brushRing);
+    this.steepPos = { x: 0, y: 0, z: 0 };
+    this.steepLabel = Labels.add('', 'steep', this.steepPos); this.steepLabel.show(false);
+
     this.bindInput();
     $('#resort-name').textContent = map.name;
     this.setTool('select');
@@ -147,12 +155,29 @@ const App = {
   bindInput() {
     const el = this.renderer.domElement;
     let down = null;
-    el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, b: e.button }; });
-    el.addEventListener('pointerup', (e) => {
-      if (down && down.b === 0 && e.button === 0 && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) this.click();
+    // capture phase: runs before OrbitControls, so a drawing stroke can switch the camera off
+    el.addEventListener('pointerdown', (e) => {
+      down = { x: e.clientX, y: e.clientY, b: e.button, moved: false };
+      this.mouse = { x: e.clientX, y: e.clientY }; this.updateHover();
+      if (e.button === 0 && (this.tool === 'run' || this.tool === 'cut') && this.hover) {
+        this.stroke = { cut: 0, last: null }; this.controls.enabled = false;
+      }
+    }, true);
+    el.addEventListener('pointermove', (e) => {
+      this.mouse = { x: e.clientX, y: e.clientY };
+      this.updateHover();
+      if (down && this.stroke) {
+        if (!down.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) down.moved = true;
+        if (down.moved) this.strokeMove();
+      }
+    });
+    addEventListener('pointerup', (e) => {
+      if (!down) return;
+      const click = down.b === 0 && e.button === 0 && !down.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6;
+      if (this.stroke) { this.controls.enabled = true; if (down.moved) this.strokeEnd(); else this.click(); this.stroke = null; }
+      else if (click) this.click();
       down = null;
     });
-    el.addEventListener('pointermove', (e) => { this.mouse = { x: e.clientX, y: e.clientY }; this.updateHover(); });
     el.addEventListener('pointerleave', () => { this.mouse = null; this.updateHover(); });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -166,8 +191,12 @@ const App = {
 
     addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT') return;
-      const keys = { '1': 'select', '2': 'chair', '3': 'gondola', '4': 'run', '5': 'bulldoze' };
+      const keys = { '1': 'select', '2': 'chair', '3': 'gondola', '4': 'run', '5': 'cut', '6': 'bulldoze' };
       if (keys[e.key]) this.setTool(keys[e.key]);
+      else if (e.key === '[' || e.key === ']') {
+        this.brush = clamp(this.brush + (e.key === ']' ? 10 : -10), 20, 120);
+        this.brushRing.scale.setScalar(this.brush); this.updateHover();
+      }
       else if (e.key === 'Escape') this.setTool(this.tool === 'select' ? 'select' : this.tool);
       else if (e.key === 'Enter') this.finishRun();
       else if (e.key === 'Backspace' && this.draft && this.draft.pts) { this.draft.pts.pop(); this.updateHover(); e.preventDefault(); }
@@ -179,6 +208,10 @@ const App = {
     this.tool = t;
     this.draft = t === 'chair' || t === 'gondola' ? { a: null } : t === 'run' ? { pts: [] } : null;
     for (const b of document.querySelectorAll('[data-tool]')) b.classList.toggle('active', b.dataset.tool === t);
+    const drawing = t === 'run' || t === 'cut';
+    Terrain.showSlopeMap(t === 'run');
+    this.controls.mouseButtons.RIGHT = drawing ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
+    $('#slope-legend').hidden = t !== 'run';
     this.clearPreview();
     this.updateHover();
   },
@@ -229,6 +262,8 @@ const App = {
       if (node) { this.snapRing.visible = true; this.snapRing.position.set(node.x, node.y + 3, node.z); }
       if (this.tool === 'select' || this.tool === 'bulldoze') this.showTooltip(Net.edgeNear(hit.x, hit.z));
     }
+    this.brushRing.visible = !!hit && this.tool === 'cut';
+    if (this.brushRing.visible) this.brushRing.position.set(hit.x, hit.y + 4, hit.z);
     this.updatePreview();
   },
 
@@ -250,6 +285,7 @@ const App = {
   clearPreview() {
     if (this.preview) { this.scene.remove(this.preview); this.preview.geometry.dispose(); this.preview.material.dispose(); this.preview = null; }
     if (this.liftLine) this.liftLine.visible = false;
+    if (this.steepLabel) this.steepLabel.show(false);
   },
 
   updatePreview() {
@@ -260,6 +296,11 @@ const App = {
     $('#finish-run').hidden = true;
     if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom. Pick a tool to build.';
     else if (t === 'bulldoze') hint = 'Click a lift or run to remove it (50% refund).';
+    else if (t === 'cut') {
+      const n = h ? Terrain.treesNear([h], this.brush).length : 0;
+      hint = `Click or drag to fell trees · ${n} under the brush · <b>${money(n * TREE_COST)}</b> · <span class="dim">[ ] brush size · right-drag to rotate</span>` +
+        `<br><span class="dim">Forest left: ${Math.round(Game.forestLeft() * 100)}%. Clear more than 10% and the views suffer, so fewer visitors come.</span>`;
+    }
     else if (t === 'chair' || t === 'gondola') {
       const T = LIFT_TYPES[t];
       if (!d.a) hint = `Click the bottom station of the ${T.name.toLowerCase()} — snap to a lodge or a run end.`;
@@ -272,19 +313,24 @@ const App = {
         this.liftLine.material.color.set(plan.ok ? 0x3dff9a : 0xff4d4d);
         this.liftLine.visible = true;
         hint = `${fmt(plan.len)} m · climbs ${fmt(plan.vert)} m · <b>${money(plan.cost)}</b>` +
+          (plan.trees ? ` <span class="dim">(incl. ${plan.trees} trees to fell)</span>` : '') +
           (plan.ok ? ' — click to build' : ` — <span class="neg">${plan.msg}</span>`) + ' · Esc to cancel';
       }
     } else if (t === 'run') {
       const pts = h ? [...d.pts, h] : d.pts;
-      if (!d.pts.length) hint = 'Click the top of the run (snap to a lift top), then click points down the slope.';
+      if (!d.pts.length) hint = 'Drag from a lift top down the slope to draw a run, or click point by point. The map shows the steepness. <span class="dim">Right-drag to rotate.</span>';
       else if (pts.length >= 2) {
         const plan = Net.runPlan(pts);
         if (plan.dense) {
-          this.preview = makeRibbon(plan.dense, plan.ok ? DIFF[plan.diff].color : 0xff4d4d, 0.45);
+          this.preview = makeRibbon(plan.dense, null, 0.7, RUN_WIDTH, plan.colors);
           this.scene.add(this.preview);
+          const sp = plan.dense[plan.steepAt];
+          Object.assign(this.steepPos, { x: sp.x, y: sp.y + 30, z: sp.z });
+          this.steepLabel.set(`steepest ${Math.round(plan.maxG * 100)}%`); this.steepLabel.show(plan.maxG > 0.05);
           hint = `<b style="color:${DIFF[plan.diff].css === '#18181c' ? '#fff' : DIFF[plan.diff].css}">${DIFF[plan.diff].name}</b> · ${(plan.len / 1000).toFixed(2)} km · drop ${fmt(plan.drop)} m · steepest ${Math.round(plan.maxG * 100)}% · <b>${money(plan.cost)}</b>` +
+            (plan.trees ? ` <span class="dim">(incl. ${plan.trees} trees)</span>` : '') +
             (plan.ok ? '' : ` — <span class="neg">${plan.msg}</span>`) +
-            '<br><span class="dim">Click to add points · Enter or click a lift/lodge to finish · Backspace undo · Esc cancel</span>';
+            '<br><span class="dim">Keep dragging or clicking · end on a lift or lodge to finish, or press Enter · Backspace undo · Esc cancel</span>';
         }
         $('#finish-run').hidden = d.pts.length < 2;
       }
@@ -307,6 +353,10 @@ const App = {
         Save.write();
         this.draft = { a: null };
       }
+    } else if (t === 'cut' && h) {
+      const n = Game.cutAt(h.x, h.z, this.brush);
+      if (n) { UI.toast(`Felled ${n} trees for ${money(n * TREE_COST)}`); Save.write(); }
+      else if (Terrain.treesNear([h], this.brush).length) UI.toast('Not enough money');
     } else if (t === 'run' && h) {
       const last = d.pts[d.pts.length - 1];
       if (last && Math.hypot(last.x - h.x, last.z - h.z) < 15) return;
@@ -314,6 +364,33 @@ const App = {
       if (d.pts.length >= 2 && h.node && h.node !== d.pts[0].node) return this.finishRun();
     }
     this.updateHover();
+  },
+
+  strokeMove() {
+    const h = this.hover, st = this.stroke;
+    if (!h) return;
+    if (this.tool === 'cut') {
+      if (st.last && Math.hypot(st.last.x - h.x, st.last.z - h.z) < this.brush * 0.4) return;
+      st.last = { x: h.x, z: h.z };
+      st.cut += Game.cutAt(h.x, h.z, this.brush);
+      return;
+    }
+    const pts = this.draft.pts, last = pts[pts.length - 1];
+    if (!last) { pts.push({ ...h }); return; }
+    const gap = Math.hypot(last.x - h.x, last.z - h.z);
+    if (gap >= 30 || (h.node && h.node !== last.node && gap > 5)) pts.push({ ...h });
+  },
+
+  strokeEnd() {
+    if (this.tool === 'cut') {
+      if (this.stroke.cut) { UI.toast(`Felled ${this.stroke.cut} trees for ${money(this.stroke.cut * TREE_COST)}`); Save.write(); }
+      return;
+    }
+    const pts = this.draft.pts, h = this.hover, last = pts[pts.length - 1];
+    if (h && last && Math.hypot(last.x - h.x, last.z - h.z) > 10) pts.push({ ...h });
+    const end = pts[pts.length - 1];
+    if (pts.length >= 2 && end.node && end.node !== pts[0].node) this.finishRun();
+    else this.updateHover();
   },
 
   finishRun() {
@@ -357,6 +434,8 @@ const App = {
     $('#rep').textContent = `${Math.round(Game.rep)}%`;
     $('#rep').classList.toggle('neg', Game.rep < MIN_REP + 15);
     $('#costs').textContent = money(-Game.dailyCost());
+    $('#forest').textContent = `${Math.round(Game.forestLeft() * 100)}%`;
+    $('#forest').classList.toggle('neg', Game.scenery() < 1);
     const danger = UI.dangers()[0];
     $('#danger').hidden = !danger || Game.dayOver;
     if (danger) $('#danger').textContent = danger;

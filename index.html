@@ -29,6 +29,7 @@
     <span class="stat"><i>Happiness</i><b id="happy"></b></span>
     <span class="stat"><i>Reputation</i><b id="rep"></b></span>
     <span class="stat"><i>Costs / day</i><b id="costs"></b></span>
+    <span class="stat"><i>Forest</i><b id="forest"></b></span>
     <span class="stat wide"><i>Status</i><b id="status"></b></span>
     <span class="speed">
       <button data-speed="0" title="Pause (Space)">❚❚</button>
@@ -44,7 +45,16 @@
     <button data-tool="chair" title="2 · €20 000 + €55/m · 4 seats, 2 057 skiers/h"><span>⛶</span>Chairlift</button>
     <button data-tool="gondola" title="3 · €60 000 + €120/m · 8 seats, 2 880 skiers/h, fast"><span>▣</span>Gondola</button>
     <button data-tool="run" title="4 · €25/m"><span>〰</span>Ski run</button>
-    <button data-tool="bulldoze" title="5 · 50% refund"><span>✕</span>Remove</button>
+    <button data-tool="cut" title="5 · €150 per tree"><span>🪓</span>Cut trees</button>
+    <button data-tool="bulldoze" title="6 · 50% refund"><span>✕</span>Remove</button>
+    <div class="legend" id="slope-legend" hidden>
+      <b>Slope map</b>
+      <div><i style="background:#8cb8ff"></i>≤ 25% blue</div>
+      <div><i style="background:#ff9e99"></i>≤ 40% red</div>
+      <div><i style="background:#62626b"></i>≤ 90% black</div>
+      <div><i style="background:#c04dff"></i>too steep</div>
+      <div><i style="background:#ffa31a"></i>uphill (preview)</div>
+    </div>
     <div class="legend">
       <div><i style="background:#2f7de1"></i>Blue ≤ 25%</div>
       <div><i style="background:#e0393e"></i>Red ≤ 40%</div>

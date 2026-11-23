@@ -97,3 +97,4 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 .btns button { flex: 1; padding: 11px; border: 0; border-radius: 10px; background: #1f6feb; color: #fff; font-weight: 700; }
 .btns button.ghost { background: #e8eef5; color: #1b2430; }
 #tools .legend { color: #1b2430; }
+.label.steep { background: #ffc94d; color: #1b2430; font-size: 11px; }
