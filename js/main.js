@@ -696,8 +696,9 @@ const App = {
     const e = this.edit, P = e.l.profileP, src = e.l.customTowers && e.l.customTowers[i];
     const pi = P.prof.findIndex((q) => q.src === src);
     if (pi < 1) return null;
-    const q = P.prof[pi];
-    return { pi, head: q.s, y: q.y, foot: q.foot, t: Lifts.trainFor(P, pi) };
+    const q = P.prof[pi], heads = P.prof.filter((r) => r.src === src).map((r) => ({ s: r.s, y: r.y }));
+    const head = heads.length > 1 ? (heads[0].s + heads[1].s) / 2 : q.s;
+    return { pi, head, y: q.y, foot: q.foot, heads, t: Lifts.trainFor(P, pi) };
   },
 
   drawPylonOverlay() {
@@ -730,8 +731,10 @@ const App = {
         color: i === e.sel ? 0x35e0ff : i === e.hover ? 0xffcf5a : 0xffffff, depthTest: false, transparent: true, opacity: 0.85 }));
       m.position.set(x, topY + 2, z); m.renderOrder = 13; m.userData.handle = true; g.add(m);
       // guide line from the foot to the head, so the pylon (and its lean) reads even when tiny on screen
-      const vg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(fx, gy, fz), new THREE.Vector3(x, topY, z)]);
-      const v = new THREE.Line(vg, new THREE.LineBasicMaterial({ color: i === e.sel ? 0x35e0ff : 0xffffff, depthTest: false }));
+      const hp = (inf ? inf.heads : [{ s: hs, y: topY }]).flatMap((h) => [new THREE.Vector3(fx, gy, fz),
+        new THREE.Vector3(l.a.x + l.dir.ux * h.s, h.y, l.a.z + l.dir.uz * h.s)]);
+      const vg = new THREE.BufferGeometry().setFromPoints(hp);
+      const v = new THREE.LineSegments(vg, new THREE.LineBasicMaterial({ color: i === e.sel ? 0x35e0ff : 0xffffff, depthTest: false }));
       v.renderOrder = 13; g.add(v);
     }
     // labels: P1 · 18 m
@@ -777,6 +780,11 @@ const App = {
       const middle = tr && tr.linked && inf.pi > tr.i && inf.pi < tr.j;
       r.disabled = !!middle;
       $('#pp-h-note').textContent = middle ? 'This pylon sits inside a linked sheave train; its head follows the rope curve.' : '';
+      const isY = sel.type === 'y';
+      $('#pp-spread-row').hidden = !isY;
+      $('#pp-lean-row').hidden = isY; $('#pp-align').hidden = isY;
+      $('#pp-spread').value = sel.spread || 16;
+      $('#pp-spread-v').textContent = `${Math.round(sel.spread || 16)} m between the heads`;
       $('#pp-lean').value = sel.lean || 0;
       $('#pp-lean-v').textContent = `${(sel.lean || 0).toFixed(0)}°${sel.lean ? (sel.lean > 0 ? ' uphill' : ' downhill') : ' (upright)'}`;
       $('#pp-link').checked = !!sel.link;
@@ -867,7 +875,11 @@ const App = {
       ctx.beginPath();
       if (style === 'lattice') { ctx.moveTo(X - w, sy(g)); ctx.lineTo(XH, sy(topY)); ctx.lineTo(X + w, sy(g)); }
       else if (style === 'portal') { ctx.moveTo(X - 4, sy(g)); ctx.lineTo(XH - 3, sy(topY)); ctx.lineTo(XH + 3, sy(topY)); ctx.lineTo(X + 4, sy(g)); }
-      else if (style === 'y') { const fy = g + (topY - g) * 0.62, fx = X + (XH - X) * 0.62; ctx.moveTo(X, sy(g)); ctx.lineTo(fx, sy(fy)); ctx.lineTo(XH - 4, sy(topY)); ctx.moveTo(fx, sy(fy)); ctx.lineTo(XH + 4, sy(topY)); }
+      else if (style === 'y' && inf && inf.heads.length > 1) {
+        const fy = g + Math.max(3, Math.min((topY - g) * 0.3, 14));
+        ctx.moveTo(X, sy(g)); ctx.lineTo(X, sy(fy));
+        for (const h of inf.heads) { ctx.moveTo(X, sy(fy)); ctx.lineTo(sx(h.s), sy(h.y)); }
+      }
       else { ctx.moveTo(X, sy(g)); ctx.lineTo(XH, sy(topY)); }
       ctx.stroke();
       ctx.fillStyle = sel ? '#35e0ff' : hov ? '#ffcf5a' : '#ffffff';
@@ -988,6 +1000,7 @@ const App = {
   bindPylonPanel() {
     $('#pp-h').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].h = +ev.target.value; this.applyPylons(); } };
     $('#pp-del').onclick = () => this.removePylon();
+    $('#pp-spread').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].spread = +ev.target.value; this.applyPylons(); } };
     $('#pp-lean').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].lean = +ev.target.value || 0; if (!e.towers[e.sel].lean) delete e.towers[e.sel].lean; this.applyPylons(); } };
     $('#pp-align').onclick = () => {
       const e = this.edit; if (!e || e.sel == null) return;
@@ -1048,7 +1061,7 @@ const App = {
     $('#lp-density-row').hidden = T.kind === 'tram' || T.kind === 'belt';
     $('#lp-open').checked = l.opt.open;
     const ps = $('#lp-pylon');
-    ps.innerHTML = (T.pylons || []).map((k) => `<option value="${k}">${PYLONS[k].name}</option>`).join('');
+    ps.innerHTML = (T.pylons || []).filter((k) => !PYLONS[k].perPylon).map((k) => `<option value="${k}">${PYLONS[k].name}</option>`).join('');
     ps.value = Lifts.pylonType(l);
     $('#lp-pylon-row').hidden = !(T.pylons || []).length;
     $('#lp-colors').innerHTML = (T.kind === 'belt' ? [] : LIFT_COLORS).map((c) => {

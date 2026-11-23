@@ -417,18 +417,20 @@ const Net = {
   pylonStylePlan(l, style) {
     const towers = l.customTowers || Lifts.autoTowers(l.T, l.a, l.a.y, l.b, l.b.y);
     const now = Lifts.towersValue(l.T, towers, Lifts.pylonType(l));
-    const next = Lifts.towersValue(l.T, towers.map((t) => ({ ...t, type: undefined })), style);
+    const next = Lifts.towersValue(l.T, towers.map((t) => ({ ...t, type: t.type && PYLONS[t.type].perPylon ? t.type : undefined })), style);
     const tooTall = towers.some((t) => t.h > Lifts.maxPylonH(l.T, style));
     const diff = l.planned ? 0 : next - now;
     return { diff, charge: diff > 0 ? diff : diff / 2, tooTall };
   },
   setPylonStyle(l, style) {
+    if (PYLONS[style] && PYLONS[style].perPylon) return { ok: false, msg: `${PYLONS[style].name} is chosen per pylon in the pylon editor` };
     const p = this.pylonStylePlan(l, style);
     if (p.tooTall) return { ok: false, msg: `Some pylons are taller than ${PYLONS[style].name.toLowerCase()} pylons allow (${Lifts.maxPylonH(l.T, style)} m)` };
     if (p.charge > Game.money) return { ok: false, msg: 'Not enough money' };
     if (p.charge > 0) Game.spend(p.charge); else Game.money -= p.charge;
     l.opt.pylon = style;
-    if (l.customTowers) l.customTowers = l.customTowers.map(({ type, ...rest }) => rest);   // keep wheels, lean, links
+    // keep wheels, lean, links and per-pylon-only types (Y-pylons); other pylons follow the new style
+    if (l.customTowers) l.customTowers = l.customTowers.map(({ type, ...rest }) => (type && PYLONS[type] && PYLONS[type].perPylon ? { ...rest, type } : rest));
     this.group.remove(l.vis); Lifts.dispose(l.vis); Lifts.build(l); this.group.add(l.vis);
     return { ok: true, charge: p.charge };
   },
@@ -443,6 +445,7 @@ const Net = {
       if (t.mode && t.mode !== 'auto') o.mode = t.mode;
       if (t.lean) o.lean = Math.round(t.lean * 10) / 10;
       if (t.link) o.link = true;
+      if (t.type === 'y' && t.spread) o.spread = Math.round(t.spread);
       return o;
     });
     this.group.remove(l.vis); Lifts.dispose(l.vis);
