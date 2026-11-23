@@ -247,6 +247,7 @@ const Net = {
       const shared = (pt) => joinWith && pt.node && (joinWith.a === pt.node || joinWith.b === pt.node);
       if (!shared(a)) a = this.freeStationSpot(T, a, b, true);
       if (!shared(b)) b = this.freeStationSpot(T, b, a, false);
+      if (a.moved || b.moved) var crossed = this.crossings(a, b);
       ya = this.pointY(a); yb = this.pointY(b);
     }
     const hl = Math.hypot(b.x - a.x, b.z - a.z), vert = yb - ya, len = Math.hypot(hl, vert);
@@ -267,14 +268,15 @@ const Net = {
     let shared = joinWith ? T.baseCost * 0.4 : 0;           // one station building instead of two terminals
     if (!msg && !free && cost - shared > Game.money) msg = 'Not enough money';
     return { ok: !msg, msg, a, b, hl, len, vert, cost: cost - shared, build: build - shared, trees, towers: P.towers, T, type,
-             manual: manual && T.kind !== 'belt', joinWith, bendDeg };
+             manual: manual && T.kind !== 'belt', joinWith, bendDeg, crossed: typeof crossed !== 'undefined' ? crossed : [] };
   },
 
   // Buildings already standing: lodges and every lift station (planned ones too).
-  footprints() {
+  footprints(except = null) {
     const out = [];
     for (const n of this.nodes) if (n.base) out.push(Lifts.lodgeFootprint(n));
     for (const l of this.lifts) {
+      if (l === except) continue;
       out.push(Lifts.stationFootprint(l.T, l.a, l.dir.ux, l.dir.uz, true));
       out.push(Lifts.stationFootprint(l.T, l.b, l.dir.ux, l.dir.uz, false));
     }
@@ -283,7 +285,22 @@ const Net = {
 
   // If the station at point `pt` (towards `other`) would overlap a building, find the nearest free
   // spot around it (sideways first) and return it linked to the original node by a footpath.
-  freeStationSpot(T, pt, other, bottom, fps = this.footprints()) {
+  // lifts whose lines cross the segment p-q (shared stations and touching ends don't count)
+  crossings(p, q, except = null) {
+    const out = [];
+    const cross = (a, b, c, d) => {
+      const o = (p1, p2, p3) => (p2.x - p1.x) * (p3.z - p1.z) - (p2.z - p1.z) * (p3.x - p1.x);
+      const d1 = o(c, d, a), d2 = o(c, d, b), d3 = o(a, b, c), d4 = o(a, b, d);
+      return d1 * d2 < 0 && d3 * d4 < 0;
+    };
+    for (const l of this.lifts) {
+      if (l === except || (except && except.line && l.line === except.line)) continue;
+      if (cross(p, q, l.a, l.b)) out.push(l);
+    }
+    return out;
+  },
+
+  freeStationSpot(T, pt, other, bottom, fps = this.footprints(), except = null) {
     const fpAt = (x, z) => {
       const dx = other.x - x, dz = other.z - z, d = Math.hypot(dx, dz) || 1;
       return Lifts.stationFootprint(T, { x, z }, dx / d, dz / d, bottom);
@@ -291,12 +308,16 @@ const Net = {
     const clashes = (x, z) => { const f = fpAt(x, z); return fps.some((g) => Lifts.overlaps(f, g)); };
     if (!clashes(pt.x, pt.z)) return pt;
     const d0 = Math.hypot(other.x - pt.x, other.z - pt.z) || 1, ux = (other.x - pt.x) / d0, uz = (other.z - pt.z) / d0;
-    for (const dist of [30, 42, 55, 70, 88, 110, 135, 160]) {
-      for (const deg of [90, -90, 60, -60, 120, -120, 30, -30, 150, -150, 0, 180]) {
-        const r = deg * Math.PI / 180, dx = ux * Math.cos(r) - uz * Math.sin(r), dz = ux * Math.sin(r) + uz * Math.cos(r);
-        const x = pt.x + dx * dist, z = pt.z + dz * dist;
-        if (!Terrain.inside(x, z) || clashes(x, z)) continue;
-        return { x, z, linkTo: pt.node || null, moved: true };
+    // first look for a spot whose lift line crosses no other lift, then settle for any free spot
+    for (const avoidCrossing of [true, false]) {
+      for (const dist of [30, 42, 55, 70, 88, 110, 135, 160]) {
+        for (const deg of [90, -90, 60, -60, 120, -120, 30, -30, 150, -150, 0, 180]) {
+          const r = deg * Math.PI / 180, dx = ux * Math.cos(r) - uz * Math.sin(r), dz = ux * Math.sin(r) + uz * Math.cos(r);
+          const x = pt.x + dx * dist, z = pt.z + dz * dist;
+          if (!Terrain.inside(x, z) || clashes(x, z)) continue;
+          if (avoidCrossing && this.crossings({ x, z }, other, except).length) continue;
+          return { x, z, linkTo: pt.node || null, moved: true };
+        }
       }
     }
     return pt;
@@ -316,7 +337,7 @@ const Net = {
         const shared = bottom ? Lifts.partnerBelow(l) : Lifts.partnerAbove(l);     // stations on a line share one hall
         const fp = Lifts.stationFootprint(l.T, node, l.dir.ux, l.dir.uz, bottom);
         if (!shared && accepted.some((g) => Lifts.overlaps(fp, g))) {
-          const spot = this.freeStationSpot(l.T, P(node), other, bottom, accepted);
+          const spot = this.freeStationSpot(l.T, P(node), other, bottom, accepted, l);
           if (spot.moved) {
             this.evacuate(l);
             const N = this.addNode(spot.x, spot.z);
@@ -332,14 +353,7 @@ const Net = {
       if (!changed) continue;
       const plan = this.liftPlan(l.type, P(l.a), P(l.b), true, false, false);
       l.len = plan.len; l.vert = plan.vert;
-      if (l.customTowers) {
-        // keep the player's pylons: re-project them onto the moved line
-        const hl = Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z), ux = (l.b.x - l.a.x) / hl, uz = (l.b.z - l.a.z) / hl;
-        l.customTowers = l.customTowers.map((t) => {
-          const wx = oldA.x + oldDir.ux * t.s, wz = oldA.z + oldDir.uz * t.s;
-          return { ...t, s: +((wx - l.a.x) * ux + (wz - l.a.z) * uz).toFixed(1) };
-        }).filter((t) => t.s > 15 && t.s < hl - 15);
-      }
+      this.reprojectTowers(l, oldA, oldDir);
       this.rebuildLift(l);
       if (l.customTowers && l.issues.length) { l.customTowers = null; this.rebuildLift(l); notes.reset.push(l.name); }
       const up = Lifts.partnerAbove(l), down = Lifts.partnerBelow(l);
@@ -348,6 +362,66 @@ const Net = {
     }
     if (notes.moved) { this.pruneNodes(); this.version++; }
     return notes;
+  },
+
+  // keep the player's pylons when a lift end moves: same ground positions, re-measured along the new line
+  reprojectTowers(l, oldA, oldDir) {
+    if (!l.customTowers) return;
+    const hl = Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z), ux = (l.b.x - l.a.x) / hl, uz = (l.b.z - l.a.z) / hl;
+    l.customTowers = l.customTowers.map((t) => {
+      const wx = oldA.x + oldDir.ux * t.s, wz = oldA.z + oldDir.uz * t.s;
+      return { ...t, s: +((wx - l.a.x) * ux + (wz - l.a.z) * uz).toFixed(1) };
+    }).filter((t) => t.s > 15 && t.s < hl - 15);
+  },
+
+  // The node a station belongs to: a moved station hangs off its home node by a footpath.
+  stationHome(l, end) {
+    const n = l[end];
+    if (!n.base && n.links.length === 1 && n.lifts.length === 1 && !n.runs.length) return n.links[0];
+    return n;
+  },
+
+  // Player moves one end station of a lift (within walking distance of its home node).
+  moveStationPlan(l, end, x, z) {
+    const T = l.T, home = this.stationHome(l, end), bottom = end === 'a';
+    if (bottom ? Lifts.partnerBelow(l) : Lifts.partnerAbove(l)) return { ok: false, msg: 'This station is shared with the next section of the line' };
+    const atHome = Math.hypot(x - home.x, z - home.z) < 25;
+    const px = atHome ? home.x : x, pz = atHome ? home.z : z;
+    const P = (n) => ({ x: n.x, z: n.z, node: n });
+    const here = atHome ? P(home) : { x: px, z: pz };
+    const other = bottom ? l.b : l.a;
+    const out = { ok: true, msg: null, x: px, z: pz, atHome, home, crossings: [], cost: 0 };
+    if (Math.hypot(px - home.x, pz - home.z) > 220) return { ...out, ok: false, msg: 'Too far from its lodge or runs (max 220 m of footpath)' };
+    if (!Terrain.inside(px, pz)) return { ...out, ok: false, msg: 'Outside the map' };
+    const dx = other.x - px, dz = other.z - pz, d = Math.hypot(dx, dz) || 1;
+    const fp = Lifts.stationFootprint(T, { x: px, z: pz }, (bottom ? 1 : -1) * dx / d, (bottom ? 1 : -1) * dz / d, bottom);
+    if (this.footprints(l).some((g) => Lifts.overlaps(fp, g))) return { ...out, ok: false, msg: 'It would overlap another building' };
+    const plan = this.liftPlan(l.type, bottom ? here : P(l.a), bottom ? P(l.b) : here, true, false, false);
+    if (!plan.ok) return { ...out, ok: false, msg: plan.msg };
+    const now = this.liftPlan(l.type, P(l.a), P(l.b), true, false, false);
+    out.cost = l.planned ? 0 : Math.max(0, plan.build - now.build);   // only extra length is paid for
+    if (out.cost > Game.money) return { ...out, ok: false, msg: `Not enough money (${money(out.cost)} for the extra length)` };
+    out.crossings = this.crossings(bottom ? { x: px, z: pz } : l.a, bottom ? l.b : { x: px, z: pz }, l);
+    out.fp = fp; out.plan = plan;
+    return out;
+  },
+  moveStation(l, end, x, z) {
+    const mp = this.moveStationPlan(l, end, x, z);
+    if (!mp.ok) return mp;
+    this.evacuate(l);
+    const oldA = { x: l.a.x, z: l.a.z }, oldDir = { ...l.dir }, old = l[end];
+    old.lifts = old.lifts.filter((x2) => x2 !== l);
+    let N = mp.home;
+    if (!mp.atHome) { N = this.addNode(mp.x, mp.z); this.linkNodes(N, mp.home); }
+    l[end] = N; N.lifts.push(l);
+    l.len = mp.plan.len; l.vert = mp.plan.vert;
+    this.reprojectTowers(l, oldA, oldDir);
+    this.rebuildLift(l);
+    if (l.customTowers && l.issues.length) { l.customTowers = null; this.rebuildLift(l); mp.reset = true; }
+    if (mp.cost) { Game.spend(mp.cost); l.cost += mp.cost; }
+    this.pruneNodes();
+    this.version++;
+    return mp;
   },
 
   // footpath between a moved station and the node it belongs to; skiers walk it freely

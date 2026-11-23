@@ -251,7 +251,7 @@ const App = {
         this.brush = clamp(this.brush + (e.key === ']' ? 10 : -10), 20, 120);
         this.brushRing.scale.setScalar(this.brush); this.updateHover();
       }
-      else if (e.key === 'Escape') { if (this.tool === 'station') { this.stationLift = null; this.setTool('select'); } else this.setTool(this.tool === 'select' ? 'select' : this.tool); }
+      else if (e.key === 'Escape') { if (this.tool === 'move') { const l = this.moving && this.moving.l; this.setTool('select'); if (l) this.openLiftPanel(l); } else if (this.tool === 'station') { this.stationLift = null; this.setTool('select'); } else this.setTool(this.tool === 'select' ? 'select' : this.tool); }
       else if (e.key === 'Enter') this.finishRun();
       else if (e.key === 'Backspace' && this.draft && this.draft.pts) { this.draft.pts.pop(); this.updateHover(); e.preventDefault(); }
       else if (e.key === 'h' || e.key === 'H') this.toggleContours();
@@ -261,6 +261,7 @@ const App = {
 
   setTool(t) {
     if (this.edit && t !== 'pylons') this.cancelPylons();
+    if (this.moving && t !== 'move') this.endMove();
     this.tool = t;
     this.draft = t === 'lift' ? { a: null } : t === 'run' ? { pts: [] } : null;
     $('#lift-types').hidden = t !== 'lift';
@@ -328,6 +329,7 @@ const App = {
       if (this.tool === 'select' || this.tool === 'bulldoze') this.showTooltip(Net.edgeNear(hit.x, hit.z));
     }
     if (this.tool === 'pylons' && this.edit) this.hoverPylons(hit);
+    if (this.tool === 'move' && this.moving) this.hoverMove(hit);
     if (this.tool === 'station' && this.stationLift) {
       const l = this.stationLift, hl = Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z);
       this.stationS = null;
@@ -380,6 +382,14 @@ const App = {
     $('#grade-it').hidden = true;
     if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom toward the cursor · WASD/arrows move · Q/E turn · double-click to fly there · click a lift for its options.';
     else if (t === 'bulldoze') hint = 'Click a lift or run to remove it (50% refund).';
+    else if (t === 'move' && this.moving) {
+      const mp = this.moving.plan, l = this.moving.l, which = this.moving.end === 'a' ? 'bottom' : 'top';
+      hint = !mp ? `Point where ${l.name}'s ${which} station should go · Esc to cancel` :
+        !mp.ok ? `<span class="neg">${mp.msg}</span>` :
+        `Click to move the ${which} station here${mp.atHome ? ' (back on its original spot)' : ''} · ` +
+        (mp.cost ? `<b>${money(mp.cost)}</b> for the extra length` : '<b>free</b>') +
+        (mp.crossings.length ? ` · <span class="warn">⚠ crosses ${mp.crossings.map((x) => x.name).join(', ')}</span>` : '') + ' · Esc to cancel';
+    }
     else if (t === 'station' && this.stationLift) {
       const l = this.stationLift, sp = this.stationS != null ? Net.midStationPlan(l, this.stationS) : null;
       hint = !sp ? `Point at ${l.name}'s line to place an intermediate station` :
@@ -411,6 +421,7 @@ const App = {
         const cap = (T.seats / (T.kind === 'tram' ? 2 * (plan.len / T.speed + T.dwell) : T.interval)) * 3600;
         hint = (plan.joinWith ? `<b class="join">Continues ${plan.joinWith.name} through an ${plan.bendDeg > 3 ? `angle station (turns ${Math.round(plan.bendDeg)}°)` : 'intermediate station'}</b> · ` : '') +
           (plan.a.moved || plan.b.moved ? '<span class="dim">Station moved next to the existing building, joined by a footpath</span> · ' : '') +
+          (plan.crossed && plan.crossed.length ? `<span class="warn">⚠ crosses ${plan.crossed.map((x) => x.name).join(', ')}</span> · ` : '') +
           `${fmt(plan.len)} m · climbs ${fmt(plan.vert)} m · ${plan.towers} towers · ${fmt(cap)} skiers/h · ride ${(plan.len / T.speed / 60).toFixed(1)} min · <b>${money(plan.cost)}</b>` +
           (plan.trees ? ` <span class="dim">(incl. ${plan.trees} trees to fell)</span>` : '') +
           (plan.ok ? ' — click to build' : ` — <span class="neg">${plan.msg}</span>`) + ' · Esc to cancel';
@@ -452,6 +463,17 @@ const App = {
     if (t === 'bulldoze') {
       const e = h && Net.edgeNear(h.x, h.z);
       if (e) { if (e === this.panelLift) this.closeLiftPanel(); Net.remove(e); UI.toast(e.planned ? `Deleted the plan for ${e.name}` : `Removed ${e.name}`); Save.write(); this.refreshPlans(); }
+    } else if (t === 'move' && this.moving) {
+      const { l, end } = this.moving, mp = this.moving.plan;
+      if (!mp) return;
+      if (!mp.ok) return UI.toast(mp.msg);
+      const r = Net.moveStation(l, end, mp.x, mp.z);
+      if (!r.ok) return UI.toast(r.msg);
+      UI.toast(`${l.name}: ${end === 'a' ? 'bottom' : 'top'} station moved${r.cost ? ` for ${money(r.cost)}` : ''}` +
+        (r.crossings.length ? `. It still crosses ${r.crossings.map((x) => x.name).join(', ')}.` : '.') +
+        (r.reset ? ' Its hand-placed pylons no longer fitted, so it has automatic pylons again.' : ''));
+      this.endMove(); Save.write(); this.setTool('select'); this.openLiftPanel(l);
+      return;
     } else if (t === 'station' && this.stationLift) {
       if (this.stationS == null) return;
       const l = this.stationLift, r = Net.addMidStation(l, this.stationS);
@@ -648,6 +670,43 @@ const App = {
     $('#plans-total').innerHTML = `${money(total)}${total > Game.money ? ' <span class="neg">(more than you have)</span>' : ''}`;
     $('#plans-build-all').disabled = !plans.length;
     $('#plans-build-all').textContent = plans.length ? `Build all · ${money(total)}` : 'Build all';
+  },
+
+  // ---------- moving a station ----------
+  startMove(l, end) {
+    this.closeLiftPanel();
+    this.moving = { l, end, plan: null };
+    this.setTool('move');
+    const n = l[end];
+    this.flyTo({ x: n.x, y: n.y, z: n.z }, 420);
+  },
+  endMove() {
+    if (this.moveVis) { this.scene.remove(this.moveVis); this.moveVis.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); this.moveVis = null; }
+    this.moving = null;
+  },
+  hoverMove(hit) {
+    const m = this.moving;
+    if (this.moveVis) { this.scene.remove(this.moveVis); this.moveVis.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); this.moveVis = null; }
+    m.plan = hit ? Net.moveStationPlan(m.l, m.end, hit.x, hit.z) : null;
+    if (!m.plan) return;
+    const mp = m.plan, col = !mp.ok ? 0xff4d4d : mp.crossings.length ? 0xffa31a : 0x3dff9a;
+    const g = new THREE.Group(), y = (x, z) => Terrain.height(x, z) + 3;
+    const other = m.end === 'a' ? m.l.b : m.l.a;
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(mp.x, y(mp.x, mp.z) + 15, mp.z), new THREE.Vector3(other.x, other.y + 18, other.z)]);
+    g.add(new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: col, depthTest: false })));
+    const home = mp.home, pathGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(mp.x, y(mp.x, mp.z), mp.z), new THREE.Vector3(home.x, home.y + 3, home.z)]);
+    g.add(new THREE.Line(pathGeo, new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 4, gapSize: 3, depthTest: false })));
+    g.children[1].computeLineDistances();
+    if (mp.fp) {
+      const f = mp.fp, px = -f.uz, pz = f.ux, c = [];
+      for (const [a, b] of [[1, 1], [1, -1], [-1, -1], [-1, 1], [1, 1]]) {
+        const x = f.cx + f.ux * f.hl * a + px * f.hw * b, z = f.cz + f.uz * f.hl * a + pz * f.hw * b;
+        c.push(new THREE.Vector3(x, y(x, z), z));
+      }
+      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(c), new THREE.LineBasicMaterial({ color: col, depthTest: false })));
+    }
+    g.traverse((o) => { o.renderOrder = 12; });
+    this.moveVis = g; this.scene.add(g);
   },
 
   // ---------- pylon editor ----------
@@ -1195,6 +1254,8 @@ const App = {
       Save.write(); this.openLiftPanel(l);
     };
     $('#lp-build').onclick = () => this.buildPlan(L());
+    $('#lp-move-a').onclick = () => this.startMove(L(), 'a');
+    $('#lp-move-b').onclick = () => this.startMove(L(), 'b');
     $('#lp-station').onclick = () => { const l = L(); this.closeLiftPanel(); this.stationLift = l; this.setTool('station'); };
     $('#lp-unstation').onclick = () => {
       const l = L(), r = Net.removeStation(l.b);

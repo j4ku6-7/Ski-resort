@@ -193,3 +193,4 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 .pp-nav button { border: 0; background: #1f6feb; color: #fff; border-radius: 8px; width: 38px; height: 32px; font-size: 14px; }
 .pp-nav #pp-count-of { flex: 1; text-align: center; font-size: 13px; }
 .pp-nav .toggle { margin: 0; font-weight: 500; }
+.lp-move { display: flex; gap: 6px; } .lp-move .ghost-btn { flex: 1; font-size: 12.5px; }

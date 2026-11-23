@@ -42,6 +42,8 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
 
    **No overlapping buildings:** if a new station would overlap a lodge or another station, it is placed on the nearest free ground beside it (sideways first) and joined to the original spot by a footpath. Skiers walk the footpath freely, so lifts and runs at either end are all reachable.
 
+   **Moving stations:** *⇄ Move bottom/top station* in the lift panel lets you place a station yourself, within 220 m of its lodge or runs. The preview is green if the spot is fine, orange if the new line crosses another lift and red if it's blocked; click the original spot to put it back. Moving is free unless the lift gets longer, in which case you pay only for the extra length. Automatic placement avoids crossing other lift lines when it can.
+
    **Mid-stations and angle stations** (detachable chairs and gondolas):
    - *Add a station on this line* in the lift panel, then click the line, places an intermediate station where skiers can get on and off, or stay on and ride through.
    - Starting a new lift of the same type at the top of an existing one, or ending one at its bottom, continues the line through an **angle station**, which can turn it by up to 90°. The shared building saves 40% of a terminal.
