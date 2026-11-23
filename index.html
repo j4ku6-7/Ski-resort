@@ -16,7 +16,7 @@
     <p class="sub">Build lifts and runs on real mountains. Terrain from real elevation data.</p>
     <p class="rules">Keep your guests happy and your books in the black. You lose if you're in debt for 3 days in a row, owe more than €100 000, or your reputation falls below 15%. Progress saves automatically in this browser.</p>
     <div id="resorts"></div>
-    <p class="foot">Elevation data: AWS Terrain Tiles (Mapzen / SRTM and others).</p>
+    <p class="foot">Elevation data: AWS Terrain Tiles (Mapzen / SRTM and others). Austrian station and peak positions: © OpenStreetMap contributors (ODbL).</p>
   </div>
 </div>
 
@@ -37,6 +37,7 @@
       <button data-speed="2">2×</button>
       <button data-speed="4">4×</button>
     </span>
+    <button id="contours" title="Height lines every 50 m, bold every 250 m (H)">≋ Height lines</button>
     <button id="to-menu" title="Back to resort selection">Menu</button>
   </header>
 
@@ -119,6 +120,9 @@
 <script src="vendor/BufferGeometryUtils.js"></script>
 <script src="data/jasna.js"></script>
 <script src="data/lomnica.js"></script>
+<script src="data/hintertux.js"></script>
+<script src="data/moelltal.js"></script>
+<script src="data/ankogel.js"></script>
 <script src="js/terrain.js"></script>
 <script src="js/labels.js"></script>
 <script src="js/lifts.js"></script>

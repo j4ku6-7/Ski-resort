@@ -77,7 +77,27 @@ const Terrain = {
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     geo.computeVertexNormals();
     this.slopeOn = false;
-    this.mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // height lines: thin every 50 m, bold every 250 m, drawn in the fragment shader so they stay crisp
+    this.contours = { value: 0 };
+    const base = { value: this.map.minH };
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uContours = this.contours;
+      sh.uniforms.uBase = base;
+      sh.vertexShader = 'varying float vElev;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vElev = position.y;');
+      sh.fragmentShader = 'uniform float uContours;\nuniform float uBase;\nvarying float vElev;\n' +
+        sh.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>
+  if (uContours > 0.5) {
+    float e = vElev + uBase;
+    float f = max(fwidth(e), 1e-4);
+    float minor = abs(fract(e / 50.0 + 0.5) - 0.5) * 50.0 / f;
+    float major = abs(fract(e / 250.0 + 0.5) - 0.5) * 250.0 / f;
+    float lm = (1.0 - smoothstep(0.4, 1.3, minor)) * smoothstep(4.0, 9.0, 50.0 / f);
+    float lM = 1.0 - smoothstep(0.7, 2.0, major);
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.50, 0.30, 0.16), max(lm * 0.5, lM * 0.85));
+  }`);
+    };
+    this.mesh = new THREE.Mesh(geo, mat);
     return this.mesh;
   },
 
@@ -92,12 +112,15 @@ const Terrain = {
         const e = this.elev(y);
         const noise = (Math.sin(i * 12.9898 + j * 78.233) * 43758.5453) % 1 * 0.05;
         const rock = smoothstep(0.72, 1.05, g);
-        const forest = 1 - smoothstep(1300, 1650, e);
+        const tl = this.map.treeline || 1550;
+        const forest = 1 - smoothstep(tl - 250, tl + 100, e);
+        // glaciers: flatter ground above the glacier line gets a cold blue-white tint
+        const ice = this.map.glacier ? smoothstep(this.map.glacier - 80, this.map.glacier + 120, e) * (1 - smoothstep(0.45, 0.75, g)) : 0;
         let r = 0.95 - forest * 0.07, gr = 0.965 - forest * 0.05, b = 1.0 - forest * 0.04;
         r = r * (1 - rock) + (0.42 + noise) * rock;
         gr = gr * (1 - rock) + (0.41 + noise) * rock;
         b = b * (1 - rock) + (0.43 + noise) * rock;
-        col[3 * k] = r; col[3 * k + 1] = gr; col[3 * k + 2] = b;
+        col[3 * k] = r * (1 - ice) + 0.80 * ice; col[3 * k + 1] = gr * (1 - ice) + 0.90 * ice; col[3 * k + 2] = b * (1 - ice) + 0.98 * ice;
       }
     }
     this.baseColors = col;
@@ -180,6 +203,8 @@ const Terrain = {
     return out;
   },
 
+  showContours(on) { if (this.contours) this.contours.value = on ? 1 : 0; },
+
   showSlopeMap(on) {
     if (!this.mesh || this.slopeOn === on) return;
     this.slopeOn = on;
@@ -213,7 +238,8 @@ const Terrain = {
       for (let x = step / 2; x < this.W; x += step) {
         const px = x + (rnd() - 0.5) * step * 0.9, pz = z + (rnd() - 0.5) * step * 0.9;
         const e = this.elev(this.height(px, pz));
-        let p = e < 1250 ? 0.92 : e < 1620 ? 0.92 * (1620 - e) / 370 : 0;
+        const tl = this.map.treeline || 1550;
+        let p = e < tl - 300 ? 0.92 : e < tl + 70 ? 0.92 * (tl + 70 - e) / 370 : 0;
         if (this.slope(px, pz) > 0.85) p *= 0.15;
         p *= 0.55 + 0.6 * (0.5 + 0.5 * Math.sin(px * 0.0031 + 1.3) * Math.cos(pz * 0.0027 - 0.4));
         if (rnd() < p) pts.push(px, pz, 0.7 + rnd() * 0.7);

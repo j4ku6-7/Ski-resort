@@ -7,6 +7,11 @@ A 3D ski-resort builder on real mountains, built with Three.js (vendored, no bui
 ## Resorts
 - **Jasná – Chopok** (Nízke Tatry)
 - **Tatranská Lomnica** (Vysoké Tatry)
+- **Hintertuxer Gletscher** (Zillertal, Tirol): valley station at 1 500 m, up to Olperer 3 476 m
+- **Mölltaler Gletscher** (Hohe Tauern): skiers arrive at 2 200 m by the underground Gletscher Express from Innerfragant
+- **Ankogel – Mallnitz** (Hohe Tauern): from the Ankogelbahn valley station at 1 280 m
+
+Each map has its own treeline (about 1 550 m in the Tatras, about 2 000 m in the Alps), and glaciers get an icy tint. Positions of the Austrian lift stations and peaks come from OpenStreetMap (© OpenStreetMap contributors, ODbL).
 
 The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), baked into `data/<resort>.js` by `tools/fetch_dem.py`.
 
@@ -32,7 +37,7 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
    - Experts ski all runs.
 4. Skiers lose happiness from long queues, from dead ends (they have to walk back), and from having nothing they can ski. Happiness drives reputation, and reputation drives visitor numbers.
 
-Keys: `1`–`5` pick tools, `Esc` cancels, `Backspace` removes the last run point, `[` `]` change the tree brush size, `Space` pauses.
+Keys: `1`–`5` pick tools, `H` toggles height lines (a thin line every 50 m, bold every 250 m), `Esc` cancels, `Backspace` removes the last run point, `[` `]` change the tree brush size, `Space` pauses.
 
 **Piste angle & grading** (in the run tool panel):
 - **Hold angle while drawing:** the run steers across the hillside so the natural ground drops at the angle you pick. On a steep hill it traverses more.

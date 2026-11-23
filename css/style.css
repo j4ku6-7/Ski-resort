@@ -133,3 +133,9 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 .presets button { flex: 1; border: 1px solid #cfd8e3; background: #fff; border-radius: 8px; padding: 6px 4px; font-size: 12.5px; }
 .presets button.active { border-color: #1f6feb; background: #eef4ff; font-weight: 700; }
 .presets button:nth-child(1) { color: #2f7de1; } .presets button:nth-child(2) { color: #e0393e; }
+#contours { border: 0; background: #e8eef5; padding: 6px 10px; border-radius: 7px; }
+#contours.active { background: #8a5a2e; color: #fff; }
+/* menu: more resorts */
+#menu { overflow-y: auto; padding: 24px 16px; }
+.menu-inner { width: min(980px, 94vw); }
+#resorts { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }

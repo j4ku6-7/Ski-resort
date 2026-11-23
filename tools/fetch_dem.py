@@ -44,6 +44,55 @@ RESORTS = {
             {"name": "Tatranská Lomnica", "lat": 49.1650, "lon": 20.2790, "kind": "base"},
         ],
     },
+    # Austria. Coordinates of stations/peaks from OpenStreetMap (© OpenStreetMap contributors, ODbL).
+    "hintertux": {
+        "name": "Hintertuxer Gletscher",
+        "region": "Zillertal, Tirol, Austria",
+        "bbox": [47.040, 11.632, 47.112, 11.722],
+        "treeline": 2000, "glacier": 2700,
+        "places": [
+            {"name": "Olperer", "real": 3476, "lat": 47.05331, "lon": 11.65872, "kind": "peak", "snap": 120},
+            {"name": "Gefrorene-Wand-Spitzen", "real": 3288, "lat": 47.06495, "lon": 11.67889, "kind": "peak", "snap": 120},
+            {"name": "Großer Kaserer", "real": 3263, "lat": 47.0603, "lon": 11.65748, "kind": "peak", "snap": 80},
+            {"name": "Hoher Riffler", "real": 3231, "lat": 47.08132, "lon": 11.70434, "kind": "peak", "snap": 120},
+            {"name": "Fußstein", "real": 3380, "lat": 47.04706, "lon": 11.64947, "kind": "peak", "snap": 120},
+            {"name": "Sommerbergalm", "real": 2100, "lat": 47.0975, "lon": 11.66364, "kind": "spot"},
+            {"name": "Tuxer Fernerhaus", "real": 2660, "lat": 47.0774, "lon": 11.6709, "kind": "spot"},
+            {"name": "Gletscherbus 3 Bergstation", "real": 3250, "lat": 47.06267, "lon": 11.68053, "kind": "spot"},
+            {"name": "Hintertux Talstation", "lat": 47.10683, "lon": 11.67498, "kind": "base"},
+        ],
+    },
+    "ankogel": {
+        "name": "Ankogel – Mallnitz",
+        "region": "Hohe Tauern, Austria",
+        "bbox": [47.005, 13.168, 47.062, 13.262],
+        "treeline": 1950, "glacier": 2750,
+        "places": [
+            {"name": "Ankogel", "real": 3249, "lat": 47.05115, "lon": 13.24868, "kind": "peak", "snap": 120},
+            {"name": "Grauleitenspitze", "real": 2891, "lat": 47.04698, "lon": 13.2281, "kind": "peak", "snap": 120},
+            {"name": "Schönbretterkogel", "real": 2732, "lat": 47.04269, "lon": 13.19072, "kind": "peak", "snap": 120},
+            {"name": "Maresenspitz", "real": 2915, "lat": 47.00452, "lon": 13.2296, "kind": "peak", "snap": 120},
+            {"name": "Ankogelbahn Mittelstation", "real": 1941, "lat": 47.02782, "lon": 13.19409, "kind": "spot"},
+            {"name": "Ankogelbahn Bergstation", "real": 2630, "lat": 47.04251, "lon": 13.21544, "kind": "spot"},
+            {"name": "Ankogelbahn Talstation", "lat": 47.01379, "lon": 13.18627, "kind": "base"},
+        ],
+    },
+    "moelltal": {
+        "name": "Mölltaler Gletscher",
+        "region": "Hohe Tauern, Austria",
+        "bbox": [46.995, 12.972, 47.056, 13.062],
+        "treeline": 1950, "glacier": 2650,
+        "places": [
+            {"name": "Schareck", "real": 3123, "lat": 47.04155, "lon": 13.01774, "kind": "peak", "snap": 120},
+            {"name": "Baumbachspitze", "real": 3105, "lat": 47.03879, "lon": 13.02113, "kind": "peak", "snap": 80},
+            {"name": "Schlapperebenspitzen", "real": 3021, "lat": 47.02786, "lon": 13.02887, "kind": "peak", "snap": 120},
+            {"name": "Alteck", "real": 2942, "lat": 47.03561, "lon": 12.98535, "kind": "peak", "snap": 120},
+            {"name": "Weißseekopf", "real": 2910, "lat": 47.0155, "lon": 12.99537, "kind": "peak", "snap": 120},
+            {"name": "Mittlerer Murauerkopf", "real": 2988, "lat": 47.02238, "lon": 13.04912, "kind": "peak", "snap": 120},
+            # skiers arrive by the underground Gletscher Express funicular from Innerfragant
+            {"name": "Gletscher Express (from Innerfragant)", "lat": 47.01601, "lon": 13.01571, "kind": "base"},
+        ],
+    },
 }
 
 
@@ -110,8 +159,8 @@ def build(key, cfg):
     for p in cfg["places"]:
         x, z = to_xz(p["lat"], p["lon"])
         i, j = int(round(x / CELL)), int(round(z / CELL))
-        if p["kind"] == "peak":  # snap to the highest cell within ~400 m
-            r = int(400 / CELL)
+        if p["kind"] == "peak":  # snap to the highest cell nearby (OSM-sourced points use a small radius)
+            r = int(p.get("snap", 400) / CELL)
             sub = grid[max(0, j - r):j + r + 1, max(0, i - r):i + r + 1]
             dj, di = np.unravel_index(np.argmax(sub), sub.shape)
             j, i = max(0, j - r) + dj, max(0, i - r) + di
@@ -122,6 +171,7 @@ def build(key, cfg):
     out = {
         "key": key, "name": cfg["name"], "region": cfg["region"],
         "w": gw, "h": gh, "cell": CELL, "minH": min_h, "scale": 0.1,
+        "treeline": cfg.get("treeline", 1550), "glacier": cfg.get("glacier"),
         "places": places,
         "heights": base64.b64encode(enc.tobytes()).decode(),
     }

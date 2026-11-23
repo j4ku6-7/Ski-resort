@@ -139,6 +139,9 @@ const App = {
     this.bindInput();
     this.bindLiftPanel();
     this.bindRunOptions();
+    let contours = false;
+    try { contours = localStorage.getItem('skiresort.contours') === '1'; } catch { /* ignore */ }
+    this.toggleContours(contours);
     this.buildLiftPicker();
     $('#resort-name').textContent = map.name;
     this.setTool('select');
@@ -191,6 +194,7 @@ const App = {
     $('#over-menu').onclick = () => location.replace(location.pathname);
     $('#to-menu').onclick = () => { Save.write(); location.replace(location.pathname); };
     $('#finish-run').onclick = () => this.finishRun();
+    $('#contours').onclick = () => this.toggleContours();
 
     addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT') return;
@@ -203,6 +207,7 @@ const App = {
       else if (e.key === 'Escape') this.setTool(this.tool === 'select' ? 'select' : this.tool);
       else if (e.key === 'Enter') this.finishRun();
       else if (e.key === 'Backspace' && this.draft && this.draft.pts) { this.draft.pts.pop(); this.updateHover(); e.preventDefault(); }
+      else if (e.key === 'h' || e.key === 'H') this.toggleContours();
       else if (e.key === ' ') { this.setSpeed(Game.paused ? Game.speed : 0); e.preventDefault(); }
     });
   },
@@ -385,6 +390,13 @@ const App = {
   },
 
   grade() { return this.grading ? this.gradeDeg : null; },
+
+  toggleContours(on = !this.contoursOn) {
+    this.contoursOn = on;
+    Terrain.showContours(on);
+    $('#contours').classList.toggle('active', on);
+    try { localStorage.setItem('skiresort.contours', on ? '1' : '0'); } catch { /* ignore */ }
+  },
 
   // Extend the run from its last point toward `h`, traversing the hill at the held angle.
   // Snaps onto a lift/lodge when the traverse arrives next to it. `partial` = mid-drag (no snapping).
