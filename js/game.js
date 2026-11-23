@@ -343,7 +343,13 @@ const Net = {
 
   // Replace a lift's pylons (from the pylon editor) and rebuild it.
   setTowers(l, towers) {
-    l.customTowers = towers.map((t) => (t.type ? { s: +t.s.toFixed(1), h: Math.round(t.h), type: t.type } : { s: +t.s.toFixed(1), h: Math.round(t.h) }));
+    l.customTowers = towers.map((t) => {
+      const o = { s: +t.s.toFixed(1), h: Math.round(t.h) };
+      if (t.type) o.type = t.type;
+      if (t.wheels) o.wheels = t.wheels;
+      if (t.mode && t.mode !== 'auto') o.mode = t.mode;
+      return o;
+    });
     this.group.remove(l.vis); Lifts.dispose(l.vis);
     Lifts.build(l); this.group.add(l.vis);
     if (l.issues.length) this.setLiftOpen(l, false);

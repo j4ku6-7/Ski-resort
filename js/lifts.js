@@ -3,7 +3,8 @@
 
 // Pylon styles: cost multiplier and how much taller than the lift's standard height they may go.
 const PYLONS = {
-  tube: { name: 'Tubular steel', cost: 1, hMult: 1, desc: 'Slim single tube. Cheapest, standard height.' },
+  mgd: { name: 'Modern MGD tube', cost: 1.15, hMult: 1.15, desc: 'Conical galvanised tube with a box crossarm, catwalks along the sheave trains, a caged ladder and a maintenance gantry, like on modern 8-person gondolas.' },
+  tube: { name: 'Classic tube', cost: 1, hMult: 1, desc: 'Slim single tube. Cheapest, standard height.' },
   lattice: { name: 'Lattice truss', cost: 1.5, hMult: 1.6, desc: 'Classic four-legged truss. Expensive, can be built much taller.' },
   portal: { name: 'Portal frame', cost: 1.3, hMult: 1.25, desc: 'Two legs and a cross beam, straddling wide ropes.' },
 };
@@ -36,7 +37,7 @@ const LIFT_TYPES = {
     desc: 'Fixed-grip double chair. Cheap but slow; long rides get cold.',
   },
   chair4: {
-    name: 'Detachable quad', icon: '⑃', kind: 'aerial', model: 'chair4', pylons: ['tube', 'lattice'],
+    name: 'Detachable quad', icon: '⑃', kind: 'aerial', model: 'chair4', pylons: ['mgd', 'tube', 'lattice'],
     maxSpan: 350, maxTowerH: 45,
     speed: 5, interval: 6, seats: 4, minLen: 150, maxLen: 3000, minVert: 20,
     baseCost: 120000, perM: 70, towerCost: 9000, opBase: 3000, opPerM: 1.6, cold: 1,
@@ -44,7 +45,7 @@ const LIFT_TYPES = {
     desc: 'High-speed chairs that slow down in the stations. The workhorse lift.',
   },
   chair6: {
-    name: '6-seat bubble chair', icon: '⑆', kind: 'aerial', model: 'chair6', bubble: true, pylons: ['tube', 'lattice'],
+    name: '6-seat bubble chair', icon: '⑆', kind: 'aerial', model: 'chair6', bubble: true, pylons: ['mgd', 'tube', 'lattice'],
     maxSpan: 350, maxTowerH: 45,
     speed: 5, interval: 5.4, seats: 6, minLen: 150, maxLen: 3200, minVert: 20,
     baseCost: 200000, perM: 90, towerCost: 12000, opBase: 4500, opPerM: 2, cold: 0.3,
@@ -52,7 +53,7 @@ const LIFT_TYPES = {
     desc: 'High capacity, with weather bubbles and heated seats.',
   },
   gondola6: {
-    name: '6-person gondola', icon: '▢', kind: 'aerial', model: 'cabin6', enclosed: true, pylons: ['tube', 'lattice', 'portal'],
+    name: '6-person gondola', icon: '▢', kind: 'aerial', model: 'cabin6', enclosed: true, pylons: ['mgd', 'tube', 'lattice', 'portal'],
     maxSpan: 500, maxTowerH: 60,
     speed: 5, interval: 9, seats: 6, minLen: 300, maxLen: 5000, minVert: 30,
     baseCost: 190000, perM: 100, towerCost: 12000, opBase: 4500, opPerM: 2, cold: 0,
@@ -60,7 +61,7 @@ const LIFT_TYPES = {
     desc: 'Compact enclosed cabins. A cheaper gondola for medium-length lifts.',
   },
   gondola: {
-    name: '8-person gondola', icon: '▣', kind: 'aerial', model: 'gondola', enclosed: true, pylons: ['tube', 'lattice', 'portal'],
+    name: '8-person gondola', icon: '▣', kind: 'aerial', model: 'gondola', enclosed: true, pylons: ['mgd', 'tube', 'lattice', 'portal'],
     maxSpan: 600, maxTowerH: 65,
     speed: 6, interval: 10, seats: 8, minLen: 300, maxLen: 6000, minVert: 30,
     baseCost: 250000, perM: 120, towerCost: 15000, opBase: 6000, opPerM: 2.5, cold: 0,
@@ -68,7 +69,7 @@ const LIFT_TYPES = {
     desc: 'Enclosed cabins for long lifts from the valley. Warm and comfortable.',
   },
   gondola10: {
-    name: '10-person gondola', icon: '▤', kind: 'aerial', model: 'cabin10', enclosed: true, pylons: ['tube', 'lattice', 'portal'],
+    name: '10-person gondola', icon: '▤', kind: 'aerial', model: 'cabin10', enclosed: true, pylons: ['mgd', 'tube', 'lattice', 'portal'],
     maxSpan: 650, maxTowerH: 70,
     speed: 6, interval: 10, seats: 10, minLen: 300, maxLen: 6500, minVert: 30,
     baseCost: 330000, perM: 140, towerCost: 18000, opBase: 7000, opPerM: 2.8, cold: 0,
@@ -76,7 +77,7 @@ const LIFT_TYPES = {
     desc: 'Big panoramic cabins with lots of glass. High capacity on long lines.',
   },
   funitel: {
-    name: 'Funitel', icon: '⧈', kind: 'aerial', model: 'funitel', enclosed: true, ropes: [-3.2, 3.2], pylons: ['portal', 'lattice'],
+    name: 'Funitel', icon: '⧈', kind: 'aerial', model: 'funitel', enclosed: true, ropes: [-3.2, 3.2], pylons: ['portal', 'mgd', 'lattice'],
     maxSpan: 900, maxTowerH: 80,
     speed: 7, interval: 18, seats: 24, minLen: 500, maxLen: 4500, minVert: 50,
     baseCost: 900000, perM: 260, towerCost: 60000, opBase: 12000, opPerM: 4, cold: 0,
@@ -102,6 +103,9 @@ const LIFT_TYPES = {
 };
 const LIFT_ALIASES = { chair: 'chair4' };   // saves from before the lift overhaul
 const CS = 3.5;                             // carriers drawn 3.5x real size so they read at map scale
+const MAX_BEND = 4.5;                       // max rope deflection per sheave, degrees (inspection rule)
+const WHEEL_R = 0.42 * CS, WHEEL_SP = WHEEL_R * 2.15;
+const SHEAVE_MODES = { auto: 'Automatic', support: 'Bottom (support)', hold: 'Top (hold-down)', both: 'Top and bottom' };
 const LIFT_COLORS = [0xc0392b, 0xe67e22, 0xffc81e, 0x2e9e5b, 0x3d6fb6, 0x5b2d82, 0xf0f0f0, 0x9aa3ad, 0x2b2f35];
 
 // Collects transformed geometry per material and merges it, so a whole lift is a handful of meshes.
@@ -123,6 +127,9 @@ class Parts {
     }
   }
 }
+
+// rope sag ratio stored on the profile (set from the lift type in profile())
+function T_sag(P) { return P.sag || 0; }
 
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 
@@ -159,7 +166,12 @@ const Lifts = {
   towerPrice(T, h, type = (T.pylons && T.pylons[0]) || 'tube') {
     return T.towerCost * (0.4 + 0.6 * h / T.towerH) * (PYLONS[type] || PYLONS.tube).cost;
   },
-  towersValue(T, towers, defType) { return towers.reduce((v, t) => v + this.towerPrice(T, t.h, t.type || defType), 0); },
+  wheelPrice(T) { return T.towerCost * 0.025; },
+  // explicit wheel counts are paid on top of the pylon (automatic sheaves are included in its price)
+  towersValue(T, towers, defType) {
+    return towers.reduce((v, t) => v + this.towerPrice(T, t.h, t.type || defType) +
+      (t.wheels ? t.wheels * this.wheelPrice(T) * (t.mode === 'both' ? 2 : 1) : t.mode === 'both' ? 4 * this.wheelPrice(T) : 0), 0);
+  },
 
   // Interior pylons of the automatic layout, as editable {s, h} (s = metres along the line, h = height).
   autoTowers(T, a, ya, b, yb) {
@@ -173,7 +185,7 @@ const Lifts = {
     const hl = Math.hypot(b.x - a.x, b.z - a.z) || 1, ux = (b.x - a.x) / hl, uz = (b.z - a.z) / hl;
     const ground = (s) => Terrain.height(a.x + ux * s, a.z + uz * s);
     const H = T.towerH;
-    const out = { hl, ux, uz, px: -uz, pz: ux, ground, prof: [], towers: 0 };
+    const out = { hl, ux, uz, px: -uz, pz: ux, ground, prof: [], towers: 0, sag: T.sag };
     if (T.kind === 'belt') { out.prof = [{ s: 0, y: ya }, { s: hl, y: yb }]; return out; }
     const prof = [{ s: 0, y: ya + H }, { s: hl, y: yb + H }];
     const minClear = T.kind === 'surface' ? 2.5 : (T.hang || 1) * CS + 3;
@@ -183,9 +195,10 @@ const Lifts = {
     };
     out.cableY = cy;
     if (custom) {
-      for (const t of custom) if (t.s > 0 && t.s < hl) prof.push({ s: t.s, y: ground(t.s) + t.h, type: t.type });
+      for (const t of custom) if (t.s > 0 && t.s < hl) prof.push({ s: t.s, y: ground(t.s) + t.h, type: t.type, wheels: t.wheels, mode: t.mode });
       prof.sort((p, q) => p.s - q.s);
-      Object.assign(out, { prof, towers: prof.length - 2 });
+      Object.assign(out, { prof, towers: prof.length - 2, custom: true });
+      out.trains = this.trains(T, out);
       return out;
     }
     const n = Math.floor(hl / T.towerGap);
@@ -209,8 +222,31 @@ const Lifts = {
     }
     out.prof = prof;
     out.towers = prof.length - 2;
+    out.trains = this.trains(T, out);
     return out;
   },
+
+  // Sheave trains: for each pylon, the rope comes in at angle a1 and leaves at a2. The wheels sit on
+  // a curve between those angles, so the rope is bent gradually over them (bend shared per wheel).
+  trains(T, P) {
+    const out = [];
+    if (T.kind === 'belt') return out;
+    for (let i = 1; i < P.prof.length - 1; i++) {
+      const p = P.prof[i], prev = P.prof[i - 1], next = P.prof[i + 1], s = p.s;
+      const a1 = Math.atan2(p.y - P.cableY(prev, p, s - 4), 4), a2 = Math.atan2(P.cableY(p, next, s + 4) - p.y, 4);
+      const bend = a1 - a2, deg = Math.abs(bend) * 180 / Math.PI;
+      const press = bend >= 0;                                     // rope presses down (crest) or lifts (dip)
+      const mode = p.mode && p.mode !== 'auto' ? p.mode : press ? 'support' : 'hold';
+      const autoN = Math.max(2, 2 * Math.ceil(Math.max(1, deg / MAX_BEND) / 2));
+      const n = T.kind === 'surface' ? 2 : Math.max(2, Math.min(16, p.wheels || autoN));
+      const r = T.kind === 'surface' ? 0.9 : WHEEL_R, sp = T.kind === 'surface' ? 2.2 : WHEEL_SP, Lt = (n - 1) * sp;
+      out.push({ i, s, y: p.y, a1, a2, bend, tilt: (a1 + a2) / 2, deg, perWheel: deg / n, press, mode, n, r, sp, Lt, auto: !p.wheels });
+    }
+    return out;
+  },
+
+  // rope height over a train at distance d from the pylon centre (parabola from slope a1 to a2)
+  trainY(t, d) { return t.y + Math.tan(t.tilt) * d - (t.Lt > 0 ? (t.bend / (2 * t.Lt)) * d * d : 0); },
 
   // Safety inspection of a rope profile. Returns issues (strings) and coloured rope samples.
   inspect(T, P, a) {
@@ -237,12 +273,40 @@ const Lifts = {
     if (high) issues.push(T.kind === 'surface' ? 'The rope is too high, so the T-bars can\'t reach the skiers' :
       `${T.enclosed ? 'Cabins hang' : 'Chairs hang'} ${Math.round(high)} m above the ground (max ${T.maxClear} m), too high to evacuate`);
     if (longest > T.maxSpan) issues.push(`A span of ${Math.round(longest)} m is too long (max ${T.maxSpan} m)`);
+    if (P.custom && P.trains && T.kind !== 'surface') {
+      const order = P.trains.map((t, k) => k + 1);
+      P.trains.forEach((t, k) => {
+        const name = `P${order[k]}`;
+        if (t.perWheel > MAX_BEND) issues.push(`${name}: the rope bends ${t.perWheel.toFixed(1)}° per wheel (max ${MAX_BEND}°). Add wheels.`);
+        if (t.mode === 'support' && !t.press && t.deg > 0.3) issues.push(`${name}: the rope lifts off the support wheels. Use top or top-and-bottom wheels.`);
+        if (t.mode === 'hold' && t.press && t.deg > 0.3) issues.push(`${name}: the rope presses down but only has top wheels. Use bottom or both.`);
+      });
+    }
     return { issues, samples };
   },
 
   // sampled rope polyline at lateral offset `off` (metres, + = uphill side)
   ropeLine(P, a, sgn, gauge) {
     const pts = [], { prof, ux, uz, px, pz } = P, off = sgn * gauge;
+    const at = (s, y) => pts.push({ x: a.x + ux * s + px * off, y, z: a.z + uz * s + pz * off });
+    if (P.trains && P.trains.length && P.cableY) {
+      // station -> [train contact points] -> ... -> station; spans sag between the trains
+      const sup = [{ s: 0, y: prof[0].y, Lt: 0 }, ...P.trains, { s: P.hl, y: prof[prof.length - 1].y, Lt: 0 }];
+      const exitOf = (t) => (t.Lt ? { s: t.s + t.Lt / 2, y: this.trainY(t, t.Lt / 2) } : { s: t.s, y: t.y });
+      const entryOf = (t) => (t.Lt ? { s: t.s - t.Lt / 2, y: this.trainY(t, -t.Lt / 2) } : { s: t.s, y: t.y });
+      at(sup[0].s, sup[0].y);
+      for (let k = 0; k < sup.length - 1; k++) {
+        const A = exitOf(sup[k]), B = entryOf(sup[k + 1]), span = Math.max(1, B.s - A.s), n = Math.max(1, Math.ceil(span / 15));
+        const sag = T_sag(P);
+        for (let j = 1; j <= n; j++) {
+          const u = j / n;
+          at(A.s + span * u, A.y + (B.y - A.y) * u - 4 * sag * span * u * (1 - u));
+        }
+        const t = sup[k + 1];
+        if (t.Lt) for (let w = 1; w < t.n; w++) { const d = -t.Lt / 2 + w * t.sp; at(t.s + d, this.trainY(t, d)); }
+      }
+      return pts;
+    }
     for (let i = 0; i < prof.length - 1; i++) {
       const p = prof[i], q = prof[i + 1], n = Math.max(1, Math.ceil((q.s - p.s) / 15));
       for (let k = i ? 1 : 0; k <= n; k++) {
@@ -276,10 +340,11 @@ const Lifts = {
     const lam = (c, o = {}) => new THREE.MeshLambertMaterial(Object.assign({ color: c }, o));
     this.M = {
       steel: lam(0x7b828b), dark: lam(0x2b2f35), rubber: lam(0x1a1c20), concrete: lam(0xb4afa6), roof: lam(0x3d434b),
-      wood: lam(0x9a6a3c), wall: lam(0xe9e4da), belt: lam(0x2a2d31),
+      wood: lam(0x9a6a3c), wall: lam(0xe9e4da), belt: lam(0x2a2d31), galv: lam(0xa9b1b8), grate: lam(0x6f767d),
       glass: lam(0x9fd0ff, { transparent: true, opacity: 0.35, depthWrite: false }),
       glassy: lam(0x9fc7ff, { transparent: true, opacity: 0.55 }),
       cable: new THREE.LineBasicMaterial({ color: 0x15171a }),
+      ropeMesh: lam(0x1d2024),
       station: {},
     };
     for (const k in LIFT_TYPES) this.M.station[k] = lam(LIFT_TYPES[k].station);
@@ -399,67 +464,119 @@ const Lifts = {
       this._strut(parts, 'steel', F, [x - Math.cos(a) * R, y, z - Math.sin(a) * R], [x + Math.cos(a) * R, y, z + Math.sin(a) * R], 0.35);
     }
   },
-  // sheave train: `n` wheels along the rope, tilted by `tilt`, below (support) or above (hold-down) the rope
-  _sheaves(parts, F, x, ropeY, tilt, n, r, hold) {
-    const sp = r * 2.15, len = (n - 1) * sp, cy = hold ? ropeY + r : ropeY - r;
-    const T = new THREE.Matrix4().makeRotationX(-tilt);
-    T.premultiply(new THREE.Matrix4().makeTranslation(x, cy, 0)).premultiply(F);
-    for (let k = 0; k < n; k++) {
-      const g = new THREE.CylinderGeometry(r, r, 0.45, 14); g.rotateZ(Math.PI / 2); g.translate(0, 0, -len / 2 + k * sp);
-      parts.add('rubber', g, T);
+  // Sheave assembly for one rope: wheels follow the rope curve (support below / hold-down above),
+  // joined in pairs by bogies, the bogies hung from a balancer beam.
+  _train(parts, F, x, t, gy, side) {
+    const sets = t.mode === 'both' ? ['support', 'hold'] : [t.mode];
+    let lowY = Infinity;
+    for (const set of sets) {
+      const dir = set === 'hold' ? 1 : -1, centres = [];
+      for (let w = 0; w < t.n; w++) {
+        const d = -t.Lt / 2 + w * t.sp, ry = this.trainY(t, d) - gy;
+        const th = Math.atan(Math.tan(t.tilt) - (t.Lt > 0 ? (t.bend / t.Lt) * d : 0));   // rope angle here
+        const cz = d - Math.sin(th) * t.r * dir, cy = ry + Math.cos(th) * t.r * dir;      // wheel centre off the rope
+        centres.push([cz, cy]);
+        const g = new THREE.CylinderGeometry(t.r, t.r, 0.5, 16); g.rotateZ(Math.PI / 2); g.translate(x, cy, cz);
+        parts.add('rubber', g, F);
+        const hub = new THREE.CylinderGeometry(t.r * 0.35, t.r * 0.35, 0.62, 8); hub.rotateZ(Math.PI / 2); hub.translate(x, cy, cz);
+        parts.add('steel', hub, F);
+        lowY = Math.min(lowY, cy - t.r);
+      }
+      // bogies (pairs) and the balancer beam they hang from, on the outer side of the wheels
+      const bx = x + side * 0.55, off = dir * (t.r + 0.6);
+      for (let w = 0; w + 1 < t.n; w += 2) this._strut(parts, 'steel', F, [bx, centres[w][1], centres[w][0]], [bx, centres[w + 1][1], centres[w + 1][0]], 0.45);
+      const bal = [];
+      for (let w = 0; w + 1 < t.n; w += 2) bal.push([(centres[w][0] + centres[w + 1][0]) / 2, (centres[w][1] + centres[w + 1][1]) / 2 + off]);
+      for (const [z, y] of bal) this._strut(parts, 'steel', F, [bx, y - off, z], [bx, y, z], 0.35);
+      for (let k = 0; k + 1 < bal.length; k++) this._strut(parts, 'steel', F, [bx, bal[k][1], bal[k][0]], [bx, bal[k + 1][1], bal[k + 1][0]], 0.55);
+      t['_bal' + set] = bal.length ? bal[bal.length >> 1] : [0, this.trainY(t, 0) - gy + off];
     }
-    const beam = new THREE.BoxGeometry(0.35, 0.5, len + r * 1.2); beam.translate(0.45, 0, 0); parts.add('steel', beam, T);
+    return lowY;
   },
 
   pylon(parts, l, P, i, rotY) {
-    const T = l.T, p = P.prof[i], s = p.s, a = l.a;
-    const x = a.x + P.ux * s, z = a.z + P.uz * s, gy = P.ground(s), top = p.y;
+    const T = l.T, p = P.prof[i], s = p.s, a = l.a, t = P.trains[i - 1];
+    const x = a.x + P.ux * s, z = a.z + P.uz * s, gy = P.ground(s);
     const F = new THREE.Matrix4().makeRotationY(rotY).premultiply(new THREE.Matrix4().makeTranslation(x, gy, z));
     const style = this.pylonType(l, p), surface = T.kind === 'surface';
-    // rope angles in and out of the pylon decide the sheave tilt and whether the rope presses down or lifts
-    const prev = P.prof[i - 1], next = P.prof[i + 1];
-    const a1 = Math.atan2(top - P.cableY(prev, p, s - 4), 4), a2 = Math.atan2(P.cableY(p, next, s + 4) - top, 4);
-    const tilt = (a1 + a2) / 2, bend = a1 - a2, hold = bend < -0.004 && !surface;
-    const r = surface ? 0.9 : 0.42 * CS, n = surface ? 2 : Math.max(2, Math.min(12, 2 * Math.round(Math.abs(bend) * 180 / Math.PI / 2.5) + 2));
     const ext = Math.max(0, ...(T.ropes || [0]).map(Math.abs)), reach = T.gauge + ext + 1.2;
-    const localTop = top - gy;
-    const armY = hold ? localTop + 2 * r + 1.2 : localTop - 2 * r - 1.0;
-    // sheave trains on every rope, both sides
+    const localTop = p.y - gy;
+    const hold = t.mode === 'hold', both = t.mode === 'both';
+    // crossarm: under the trains for support, above for hold-down; "both" puts it beside, at rope height
+    const armY = hold ? localTop + 2 * t.r + 1.6 : both ? localTop - 2 * t.r - 1.6 : localTop - 2 * t.r - 1.2;
+    let lowest = armY;
     for (const sgn of surface ? [1] : [1, -1]) for (const o of T.ropes || [0]) {
-      this._sheaves(parts, F, sgn * (T.gauge + o), localTop, tilt, n, r, hold);
       const cx = sgn * (T.gauge + o);
-      this._strut(parts, 'steel', F, [cx + 0.45, armY, 0], [cx + 0.45, hold ? localTop + r : localTop - r, 0], 0.4);   // hanger to the arm
+      lowest = Math.min(lowest, this._train(parts, F, cx, t, gy, sgn));
+      // hangers from the crossarm to the balancers
+      for (const set of both ? ['support', 'hold'] : [t.mode]) {
+        const bal = t['_bal' + set];
+        if (set === 'hold' && !hold) {                       // top set of a "both" train: a yoke over the rope
+          this._strut(parts, 'steel', F, [cx + sgn * 0.55, armY, 0], [cx + sgn * 1.4, armY, 0], 0.6);
+          this._strut(parts, 'steel', F, [cx + sgn * 1.4, armY, 0], [cx + sgn * 1.4, bal[1], bal[0]], 0.5);
+          this._strut(parts, 'steel', F, [cx + sgn * 1.4, bal[1], bal[0]], [cx + sgn * 0.55, bal[1], bal[0]], 0.5);
+        } else this._strut(parts, 'steel', F, [cx + sgn * 0.55, armY, 0], [cx + sgn * 0.55, bal[1], bal[0]], 0.6);
+      }
     }
-    this._box(parts, 'concrete', F, 4.5, 1.6, 4.5, 0, 0.2, 0);                                  // foundation
-    if (style === 'lattice') {
-      const H = armY, wb = Math.max(2.4, H * 0.13), wt = 1.3, segs = Math.max(2, Math.ceil(H / 7)), r0 = 0.45;
-      const corner = (t, sx, sz) => { const w = wb + (wt - wb) * t; return [sx * w, H * t, sz * w]; };
+    this._box(parts, 'concrete', F, 5, 1.8, 5, 0, 0.1, 0);                                    // foundation
+    const H = armY;
+    if (style === 'mgd') {
+      const rb = 1.25 + H * 0.018, rt = 0.85;
+      this._cyl(parts, 'galv', F, rb + 0.5, rb + 0.5, 0.5, 0, 0.9, 0, 20);                     // flange plate
+      this._cyl(parts, 'galv', F, rt, rb, H - 0.6, 0, 1.4, 0, 20);                              // conical tube
+      // box crossarm with a central head
+      this._box(parts, 'galv', F, reach * 2 + 1.5, 1.5, 1.4, 0, H + 0.2, 0);
+      this._cyl(parts, 'galv', F, 1.1, 1.1, 2.2, 0, H - 0.9, 0, 16);
+      // catwalks along both sheave trains, with railings
+      for (const sgn of [1, -1]) {
+        const wx = sgn * (reach + 0.9), wy = Math.min(H - 0.8, lowest - 0.9), L = t.Lt + 5;
+        this._box(parts, 'grate', F, 1.6, 0.18, L, wx, wy, 0);
+        this._strut(parts, 'galv', F, [sgn * (reach - 0.2), H - 0.2, 0], [wx, wy, 0], 0.3);  // bracket
+        for (let zz = -L / 2; zz <= L / 2 + 0.01; zz += 1.6) this._box(parts, 'galv', F, 0.1, 1.1, 0.1, wx + sgn * 0.75, wy + 0.6, zz);
+        this._box(parts, 'galv', F, 0.12, 0.12, L, wx + sgn * 0.75, wy + 1.15, 0);           // handrail
+      }
+      // caged ladder up the tube
+      const lz = rb + 0.45;
+      for (const lx of [-0.35, 0.35]) this._box(parts, 'galv', F, 0.08, H - 3, 0.08, lx, 1.5 + (H - 3) / 2, lz);
+      for (let y = 1.8; y < H - 1.5; y += 0.9) this._box(parts, 'galv', F, 0.7, 0.06, 0.06, 0, y, lz);
+      for (let y = 4; y < H - 1.5; y += 1.8) {
+        const ring = new THREE.TorusGeometry(0.75, 0.05, 4, 12, Math.PI); ring.rotateX(Math.PI / 2); ring.translate(0, y, lz);
+        parts.add('galv', ring, F);
+      }
+      // maintenance gantry (lifting beam) on top of the head
+      this._strut(parts, 'galv', F, [-1.4, H + 0.9, 0], [0, H + 4.2, 0], 0.32);
+      this._strut(parts, 'galv', F, [1.4, H + 0.9, 0], [0, H + 4.2, 0], 0.32);
+      this._box(parts, 'galv', F, 0.4, 0.4, 5, 0, H + 4.3, 0);
+      this._box(parts, 'accent', F, 0.9, 0.5, 0.9, 0, H + 4.8, 2.3);                          // obstruction light
+    } else if (style === 'lattice') {
+      const wb = Math.max(2.4, H * 0.13), wt = 1.3, segs = Math.max(2, Math.ceil(H / 7)), r0 = 0.45;
+      const corner = (u, sx, sz) => { const w = wb + (wt - wb) * u; return [sx * w, H * u, sz * w]; };
       const C = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
       for (const [sx, sz] of C) this._strut(parts, 'steel', F, corner(0, sx, sz), corner(1, sx, sz), r0 * 1.5);
       for (let k = 0; k < segs; k++) {
-        const t0 = k / segs, t1 = (k + 1) / segs;
+        const u0 = k / segs, u1 = (k + 1) / segs;
         for (let c = 0; c < 4; c++) {
           const [ax, az] = C[c], [bx, bz] = C[(c + 1) % 4];
-          this._strut(parts, 'steel', F, corner(t1, ax, az), corner(t1, bx, bz), r0);         // ring
-          this._strut(parts, 'steel', F, corner(t0, ax, az), corner(t1, bx, bz), r0 * 0.8);   // X bracing
-          this._strut(parts, 'steel', F, corner(t0, bx, bz), corner(t1, ax, az), r0 * 0.8);
+          this._strut(parts, 'steel', F, corner(u1, ax, az), corner(u1, bx, bz), r0);
+          this._strut(parts, 'steel', F, corner(u0, ax, az), corner(u1, bx, bz), r0 * 0.8);
+          this._strut(parts, 'steel', F, corner(u0, bx, bz), corner(u1, ax, az), r0 * 0.8);
         }
       }
-      this._box(parts, 'steel', F, reach * 2, 1.2, 1.6, surface ? reach / 2 : 0, armY, 0);
+      this._box(parts, 'steel', F, reach * 2, 1.2, 1.6, surface ? reach / 2 : 0, H, 0);
     } else if (style === 'portal') {
-      const H = armY, lx = reach, splay = H * 0.07;
+      const lx = reach, splay = H * 0.07;
       for (const sx of [-1, 1]) {
         this._strut(parts, 'steel', F, [sx * (lx + splay), 0, 0], [sx * lx, H, 0], 1.6);
         this._box(parts, 'concrete', F, 3.5, 1.4, 3.5, sx * (lx + splay), 0.2, 0);
       }
-      this._box(parts, 'steel', F, lx * 2 + 2.4, 1.8, 2, 0, H, 0);                              // cross beam
-      this._box(parts, 'steel', F, lx * 2, 0.8, 0.9, 0, H * 0.55, 0);                            // tie beam
+      this._box(parts, 'steel', F, lx * 2 + 2.4, 1.8, 2, 0, H, 0);
+      this._box(parts, 'steel', F, lx * 2, 0.8, 0.9, 0, H * 0.55, 0);
     } else {
-      const rb = surface ? 0.8 : 1.4 + armY * 0.02, rt = surface ? 0.55 : 1.0;
-      this._cyl(parts, 'steel', F, rt, rb, armY + 0.4, 0, -0.4, 0, 12);
-      if (surface) this._box(parts, 'steel', F, reach + 0.5, 0.5, 0.5, reach / 2, armY, 0);
-      else this._box(parts, 'steel', F, reach * 2, 1.0, 1.0, 0, armY, 0);
-      if (!surface) for (let y = 2; y < armY - 2; y += 1.4) this._box(parts, 'dark', F, 0.6, 0.08, 0.08, 0, y, rb + 0.25);   // ladder
+      const rb = surface ? 0.8 : 1.4 + H * 0.02, rt = surface ? 0.55 : 1.0;
+      this._cyl(parts, 'steel', F, rt, rb, H + 0.4, 0, -0.4, 0, 12);
+      if (surface) this._box(parts, 'steel', F, reach + 0.5, 0.5, 0.5, reach / 2, H, 0);
+      else this._box(parts, 'steel', F, reach * 2, 1.0, 1.0, 0, H, 0);
+      if (!surface) for (let y = 2; y < H - 2; y += 1.4) this._box(parts, 'dark', F, 0.6, 0.08, 0.08, 0, y, rb + 0.25);
     }
   },
 
@@ -566,10 +683,15 @@ const Lifts = {
     parts.build(g, mat);
 
     // ropes: one per side, or two/three for funitels, 3S and trams
+    const ropeParts = new Parts();
     for (const sgn of [1, -1]) for (const o of T.ropes || [0]) {
-      const line = this.ropeLine(P, a, 1, sgn * (T.gauge + o));
-      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(line.map((p) => new THREE.Vector3(p.x, p.y, p.z))), M.cable));
+      const line = this.ropeLine(P, a, 1, sgn * (T.gauge + o)).map((p) => new THREE.Vector3(p.x, p.y, p.z));
+      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(line), M.cable));
+      const path = new THREE.CurvePath();
+      for (let k = 0; k < line.length - 1; k++) if (line[k].distanceToSquared(line[k + 1]) > 0.01) path.add(new THREE.LineCurve3(line[k], line[k + 1]));
+      if (path.curves.length) ropeParts.add('rope', new THREE.TubeGeometry(path, path.curves.length, 0.22, 5, false));
     }
+    ropeParts.build(g, (k) => M.ropeMesh);
     const up = this.ropeLine(P, a, 1, T.gauge), down = this.ropeLine(P, a, -1, T.gauge).reverse();
     if (T.kind === 'surface') {
       // riders are dragged along the snow under the uphill rope

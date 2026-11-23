@@ -734,6 +734,14 @@ const App = {
       $('#pp-type').innerHTML = `<option value="">Lift default (${PYLONS[Lifts.pylonType(l)].name})</option>` +
         (T.pylons || []).map((k) => `<option value="${k}">${PYLONS[k].name} · up to ${Lifts.maxPylonH(T, k)} m</option>`).join('');
       $('#pp-type').value = sel.type || '';
+      const rank0 = this.pylonOrder ? this.pylonOrder.indexOf(e.sel) : e.sel, tr = l.profileP.trains && l.profileP.trains[rank0];
+      $('#pp-wheels').value = sel.wheels || 0;
+      $('#pp-wheels-v').textContent = sel.wheels ? `${sel.wheels} wheels` : `auto (${tr ? tr.n : '?'})`;
+      $('#pp-mode').value = sel.mode || 'auto';
+      if (tr) {
+        const over = tr.perWheel > MAX_BEND;
+        $('#pp-bend').innerHTML = `Rope bends <b>${tr.deg.toFixed(1)}°</b> here, ${tr.press ? 'pressing down' : 'lifting up'} · <b class="${over ? 'neg' : ''}">${tr.perWheel.toFixed(1)}° per wheel</b> (max ${MAX_BEND}°) · ${SHEAVE_MODES[tr.mode].toLowerCase()} wheels`;
+      }
     }
   },
 
@@ -814,6 +822,19 @@ const App = {
       ctx.stroke();
       ctx.fillStyle = sel ? '#35e0ff' : hov ? '#ffcf5a' : '#ffffff';
       ctx.beginPath(); ctx.arc(X, sy(g + t.h), 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const rank0 = order.indexOf(i), tr = P.trains && P.trains[rank0];
+      if (tr) {
+        const over = tr.perWheel > MAX_BEND, bad = over || (tr.mode === 'support' && !tr.press && tr.deg > 0.3) || (tr.mode === 'hold' && tr.press && tr.deg > 0.3);
+        const top = sy(g + t.h), wr = Math.min(4, Math.max(2, (sx(tr.sp) - sx(0)) * 0.45));
+        for (const set of tr.mode === 'both' ? ['support', 'hold'] : [tr.mode]) {
+          for (let w = 0; w < tr.n; w++) {
+            const d = -tr.Lt / 2 + w * tr.sp, X2 = sx(t.s + d), Y2 = sy(Lifts.trainY(tr, d)) + (set === 'hold' ? -wr - 1 : wr + 1);
+            ctx.beginPath(); ctx.arc(X2, Y2, wr, 0, Math.PI * 2);
+            ctx.fillStyle = bad ? '#ff3b2f' : '#3a3f46'; ctx.fill();
+          }
+        }
+        if (bad) { ctx.fillStyle = '#ff3b2f'; ctx.font = 'bold 11px system-ui, sans-serif'; ctx.fillText('!', X + 8, top + 4); }
+      }
       if (sel || hov || e.towers.length <= 14) {
         ctx.fillStyle = '#1b2430'; ctx.font = (sel ? 'bold ' : '') + '11px system-ui, sans-serif';
         ctx.fillText(`P${order.indexOf(i) + 1} ${Math.round(t.h)} m`, X - 18, sy(g + t.h) - 10);
@@ -913,6 +934,17 @@ const App = {
   bindPylonPanel() {
     $('#pp-h').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].h = +ev.target.value; this.applyPylons(); } };
     $('#pp-del').onclick = () => this.removePylon();
+    $('#pp-wheels').oninput = (ev) => {
+      const e = this.edit; if (!e || e.sel == null) return;
+      const n = +ev.target.value; if (n) e.towers[e.sel].wheels = n; else delete e.towers[e.sel].wheels;
+      this.applyPylons();
+    };
+    $('#pp-mode').onchange = (ev) => {
+      const e = this.edit; if (!e || e.sel == null) return;
+      if (ev.target.value === 'auto') delete e.towers[e.sel].mode; else e.towers[e.sel].mode = ev.target.value;
+      this.applyPylons();
+    };
+    $('#pp-mode').innerHTML = Object.entries(SHEAVE_MODES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
     $('#pp-type').onchange = (ev) => {
       const e = this.edit; if (!e || e.sel == null) return;
       if (ev.target.value) e.towers[e.sel].type = ev.target.value; else delete e.towers[e.sel].type;

@@ -103,11 +103,14 @@
 
   <div id="pylon-panel" class="side-panel" hidden>
     <b id="pp-title"></b>
-    <p class="dim small">Point at the lift line and click to add a pylon. Drag a pylon to move it, use + / − to change its height, and Del to remove it. The rope shows green where it's fine, orange where it's tight, red where it hits the snow, and yellow where it's too high.</p>
+    <p class="dim small">More wheels spread the rope's bend, and each wheel may take at most 4.5°. Point at the lift line and click to add a pylon. Drag a pylon to move it, use + / − to change its height, and Del to remove it. The rope shows green where it's fine, orange where it's tight, red where it hits the snow, and yellow where it's too high.</p>
     <div id="pp-sel" hidden>
       <div class="row"><span>Selected</span><b id="pp-sel-name"></b></div>
       <label class="slider">Height <input type="range" id="pp-h" step="1"><span id="pp-h-v"></span></label>
       <label class="slider">Style <select id="pp-type" aria-label="Pylon style"></select></label>
+      <label class="slider">Wheels per sheave train <input type="range" id="pp-wheels" min="0" max="16" step="2"><span id="pp-wheels-v"></span></label>
+      <label class="slider">Wheels on <select id="pp-mode" aria-label="Wheel position"></select></label>
+      <p id="pp-bend" class="small"></p>
       <button id="pp-del" class="danger-btn">Remove pylon</button>
     </div>
     <div id="pp-issues"></div>
