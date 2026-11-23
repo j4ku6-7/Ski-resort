@@ -665,6 +665,15 @@ const App = {
     }
   },
 
+  // profile point (head position, height, train) of draft pylon i
+  pylonInfo(i) {
+    const e = this.edit, P = e.l.profileP, src = e.l.customTowers && e.l.customTowers[i];
+    const pi = P.prof.findIndex((q) => q.src === src);
+    if (pi < 1) return null;
+    const q = P.prof[pi];
+    return { pi, head: q.s, y: q.y, foot: q.foot, t: Lifts.trainFor(P, pi) };
+  },
+
   drawPylonOverlay() {
     if (this.editGroup) {
       this.scene.remove(this.editGroup);
@@ -688,20 +697,24 @@ const App = {
     rope.renderOrder = 12; g.add(rope);
     const order = e.towers.map((t, i) => i).sort((a, b) => e.towers[a].s - e.towers[b].s);
     for (const i of e.towers.keys()) {
-      const t = e.towers[i], x = l.a.x + l.dir.ux * t.s, z = l.a.z + l.dir.uz * t.s, gy = Terrain.height(x, z);
+      const t = e.towers[i], inf = this.pylonInfo(i), hs = inf ? inf.head : t.s;
+      const x = l.a.x + l.dir.ux * hs, z = l.a.z + l.dir.uz * hs, fx = l.a.x + l.dir.ux * t.s, fz = l.a.z + l.dir.uz * t.s;
+      const gy = Terrain.height(fx, fz), topY = inf ? inf.y : gy + t.h;
       const m = new THREE.Mesh(new THREE.SphereGeometry(T.gauge + 3, 14, 10), new THREE.MeshBasicMaterial({
         color: i === e.sel ? 0x35e0ff : i === e.hover ? 0xffcf5a : 0xffffff, depthTest: false, transparent: true, opacity: 0.85 }));
-      m.position.set(x, gy + t.h + 2, z); m.renderOrder = 13; m.userData.handle = true; g.add(m);
-      // vertical guide so the pylon reads even when it is tiny on screen
-      const vg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, gy, z), new THREE.Vector3(x, gy + t.h, z)]);
+      m.position.set(x, topY + 2, z); m.renderOrder = 13; m.userData.handle = true; g.add(m);
+      // guide line from the foot to the head, so the pylon (and its lean) reads even when tiny on screen
+      const vg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(fx, gy, fz), new THREE.Vector3(x, topY, z)]);
       const v = new THREE.Line(vg, new THREE.LineBasicMaterial({ color: i === e.sel ? 0x35e0ff : 0xffffff, depthTest: false }));
       v.renderOrder = 13; g.add(v);
     }
     // labels: P1 · 18 m
     for (const lb of this.pylonLabels || []) lb.remove();
     this.pylonLabels = order.map((i, rank) => {
-      const t = e.towers[i], x = l.a.x + l.dir.ux * t.s, z = l.a.z + l.dir.uz * t.s;
-      return Labels.add(`P${rank + 1} · ${Math.round(t.h)} m`, 'pylon' + (i === e.sel ? ' sel' : ''), { x, y: Terrain.height(x, z) + t.h + 14, z });
+      const t = e.towers[i], inf = this.pylonInfo(i), hs = inf ? inf.head : t.s;
+      const x = l.a.x + l.dir.ux * hs, z = l.a.z + l.dir.uz * hs;
+      const extra = (t.lean ? ` ↗${Math.round(t.lean)}°` : '') + (inf && inf.t && inf.t.linked ? ' 🔗' : '');
+      return Labels.add(`P${rank + 1} · ${Math.round(t.h)} m${extra}`, 'pylon' + (i === e.sel ? ' sel' : ''), { x, y: (inf ? inf.y : Terrain.height(x, z) + t.h) + 14, z });
     });
     if (e.ghost != null) {
       const x = l.a.x + l.dir.ux * e.ghost, z = l.a.z + l.dir.uz * e.ghost, gy = Terrain.height(x, z);
@@ -734,7 +747,16 @@ const App = {
       $('#pp-type').innerHTML = `<option value="">Lift default (${PYLONS[Lifts.pylonType(l)].name})</option>` +
         (T.pylons || []).map((k) => `<option value="${k}">${PYLONS[k].name} · up to ${Lifts.maxPylonH(T, k)} m</option>`).join('');
       $('#pp-type').value = sel.type || '';
-      const rank0 = this.pylonOrder ? this.pylonOrder.indexOf(e.sel) : e.sel, tr = l.profileP.trains && l.profileP.trains[rank0];
+      const inf = this.pylonInfo(e.sel), tr = inf && inf.t;
+      const middle = tr && tr.linked && inf.pi > tr.i && inf.pi < tr.j;
+      r.disabled = !!middle;
+      $('#pp-h-note').textContent = middle ? 'This pylon sits inside a linked sheave train; its head follows the rope curve.' : '';
+      $('#pp-lean').value = sel.lean || 0;
+      $('#pp-lean-v').textContent = `${(sel.lean || 0).toFixed(0)}°${sel.lean ? (sel.lean > 0 ? ' uphill' : ' downhill') : ' (upright)'}`;
+      $('#pp-link').checked = !!sel.link;
+      $('#pp-link-note').textContent = tr && tr.linked
+        ? `Linked train P${tr.i}–P${tr.j}: ${tr.n} wheels share a ${tr.deg.toFixed(1)}° bend.`
+        : 'Link this pylon\'s sheaves to the next pylon (up to 4 pylons, at most 45 m apart) to spread a big bend over more wheels.';
       $('#pp-wheels').value = sel.wheels || 0;
       $('#pp-wheels-v').textContent = sel.wheels ? `${sel.wheels} wheels` : `auto (${tr ? tr.n : '?'})`;
       $('#pp-mode').value = sel.mode || 'auto';
@@ -812,23 +834,29 @@ const App = {
     // pylons
     const order = this.pylonOrder || e.towers.map((_, i) => i);
     e.towers.forEach((t, i) => {
-      const g = P.ground(t.s), X = sx(t.s), sel = i === e.sel, hov = i === e.hover;
+      const inf = this.pylonInfo(i), headS = inf ? inf.head : t.s, g = P.ground(t.s), X = sx(t.s), sel = i === e.sel, hov = i === e.hover;
+      const topY = inf ? inf.y : g + t.h, XH = sx(headS);
       ctx.strokeStyle = sel ? '#0aa8d6' : hov ? '#e0a400' : '#2b3440'; ctx.lineWidth = sel || hov ? 4 : 3;
       const style = Lifts.pylonType(l, t), w = Math.max(3, (sy(g) - sy(g + t.h)) * 0.12);
       ctx.beginPath();
-      if (style === 'lattice') { ctx.moveTo(X - w, sy(g)); ctx.lineTo(X, sy(g + t.h)); ctx.lineTo(X + w, sy(g)); }
-      else if (style === 'portal') { ctx.moveTo(X - 4, sy(g)); ctx.lineTo(X - 3, sy(g + t.h)); ctx.lineTo(X + 3, sy(g + t.h)); ctx.lineTo(X + 4, sy(g)); }
-      else { ctx.moveTo(X, sy(g)); ctx.lineTo(X, sy(g + t.h)); }
+      if (style === 'lattice') { ctx.moveTo(X - w, sy(g)); ctx.lineTo(XH, sy(topY)); ctx.lineTo(X + w, sy(g)); }
+      else if (style === 'portal') { ctx.moveTo(X - 4, sy(g)); ctx.lineTo(XH - 3, sy(topY)); ctx.lineTo(XH + 3, sy(topY)); ctx.lineTo(X + 4, sy(g)); }
+      else if (style === 'y') { const fy = g + (topY - g) * 0.62, fx = X + (XH - X) * 0.62; ctx.moveTo(X, sy(g)); ctx.lineTo(fx, sy(fy)); ctx.lineTo(XH - 4, sy(topY)); ctx.moveTo(fx, sy(fy)); ctx.lineTo(XH + 4, sy(topY)); }
+      else { ctx.moveTo(X, sy(g)); ctx.lineTo(XH, sy(topY)); }
       ctx.stroke();
       ctx.fillStyle = sel ? '#35e0ff' : hov ? '#ffcf5a' : '#ffffff';
-      ctx.beginPath(); ctx.arc(X, sy(g + t.h), 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      const rank0 = order.indexOf(i), tr = P.trains && P.trains[rank0];
-      if (tr) {
+      ctx.beginPath(); ctx.arc(XH, sy(topY), 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const tr = inf && inf.t;
+      if (tr && inf.pi === tr.i) {                     // draw each train once (linked trains span several pylons)
         const over = tr.perWheel > MAX_BEND, bad = over || (tr.mode === 'support' && !tr.press && tr.deg > 0.3) || (tr.mode === 'hold' && tr.press && tr.deg > 0.3);
-        const top = sy(g + t.h), wr = Math.min(4, Math.max(2, (sx(tr.sp) - sx(0)) * 0.45));
+        const top = sy(topY), wr = Math.min(4, Math.max(2, (sx(tr.sp) - sx(0)) * 0.45));
+        if (tr.linked) {
+          ctx.strokeStyle = '#0aa8d6'; ctx.lineWidth = 2; ctx.beginPath();
+          ctx.moveTo(sx(tr.s0), sy(tr.yAt(tr.s0)) + wr * 2.6); ctx.lineTo(sx(tr.s1), sy(tr.yAt(tr.s1)) + wr * 2.6); ctx.stroke();
+        }
         for (const set of tr.mode === 'both' ? ['support', 'hold'] : [tr.mode]) {
-          for (let w = 0; w < tr.n; w++) {
-            const d = -tr.Lt / 2 + w * tr.sp, X2 = sx(t.s + d), Y2 = sy(Lifts.trainY(tr, d)) + (set === 'hold' ? -wr - 1 : wr + 1);
+          for (const ws of tr.wheelS) {
+            const X2 = sx(ws), Y2 = sy(tr.yAt(ws)) + (set === 'hold' ? -wr - 1 : wr + 1);
             ctx.beginPath(); ctx.arc(X2, Y2, wr, 0, Math.PI * 2);
             ctx.fillStyle = bad ? '#ff3b2f' : '#3a3f46'; ctx.fill();
           }
@@ -837,7 +865,7 @@ const App = {
       }
       if (sel || hov || e.towers.length <= 14) {
         ctx.fillStyle = '#1b2430'; ctx.font = (sel ? 'bold ' : '') + '11px system-ui, sans-serif';
-        ctx.fillText(`P${order.indexOf(i) + 1} ${Math.round(t.h)} m`, X - 18, sy(g + t.h) - 10);
+        ctx.fillText(`P${order.indexOf(i) + 1} ${Math.round(t.h)} m${t.lean ? ` ${Math.round(t.lean)}°` : ''}`, XH - 18, sy(topY) - 10);
       }
     });
     // ghost pylon under the mouse
@@ -934,6 +962,14 @@ const App = {
   bindPylonPanel() {
     $('#pp-h').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].h = +ev.target.value; this.applyPylons(); } };
     $('#pp-del').onclick = () => this.removePylon();
+    $('#pp-lean').oninput = (ev) => { const e = this.edit; if (e && e.sel != null) { e.towers[e.sel].lean = +ev.target.value || 0; if (!e.towers[e.sel].lean) delete e.towers[e.sel].lean; this.applyPylons(); } };
+    $('#pp-align').onclick = () => {
+      const e = this.edit; if (!e || e.sel == null) return;
+      const inf = this.pylonInfo(e.sel); if (!inf || !inf.t) return;
+      e.towers[e.sel].lean = Math.round(Lifts.alignedLean(inf.t));
+      this.applyPylons();
+    };
+    $('#pp-link').onchange = (ev) => { const e = this.edit; if (e && e.sel != null) { if (ev.target.checked) e.towers[e.sel].link = true; else delete e.towers[e.sel].link; this.applyPylons(); } };
     $('#pp-wheels').oninput = (ev) => {
       const e = this.edit; if (!e || e.sel == null) return;
       const n = +ev.target.value; if (n) e.towers[e.sel].wheels = n; else delete e.towers[e.sel].wheels;

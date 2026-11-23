@@ -107,7 +107,12 @@
     <div id="pp-sel" hidden>
       <div class="row"><span>Selected</span><b id="pp-sel-name"></b></div>
       <label class="slider">Height <input type="range" id="pp-h" step="1"><span id="pp-h-v"></span></label>
+      <p id="pp-h-note" class="dim small"></p>
       <label class="slider">Style <select id="pp-type" aria-label="Pylon style"></select></label>
+      <label class="slider">Lean along the line <input type="range" id="pp-lean" min="-30" max="30" step="1"><span id="pp-lean-v"></span></label>
+      <button id="pp-align" class="ghost-btn">⤢ Align with rope</button>
+      <label class="toggle"><input type="checkbox" id="pp-link"> 🔗 Link sheaves with next pylon</label>
+      <p id="pp-link-note" class="dim small"></p>
       <label class="slider">Wheels per sheave train <input type="range" id="pp-wheels" min="0" max="16" step="2"><span id="pp-wheels-v"></span></label>
       <label class="slider">Wheels on <select id="pp-mode" aria-label="Wheel position"></select></label>
       <p id="pp-bend" class="small"></p>

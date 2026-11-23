@@ -40,6 +40,11 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
 
    Inspection fails a pylon whose rope bends too much per wheel, a rope that would lift off support-only wheels, and a rope that presses down on top-only wheels. Extra wheels cost money. The side view draws every wheel and marks a failing pylon in red.
 
+   **Linked sheaves, lean and Y-pylons:**
+   - Tick **🔗 Link sheaves with next pylon** to join up to 4 pylons (at most 45 m apart) into one long, evenly curved wheel battery, which spreads a big bend over all their wheels. The heads of linked pylons follow the rope curve. The automatic layout does this by itself at sharp crests.
+   - Pylons can **lean** up to ±30° along the line, and **Align with rope** leans one along the combined pull of its ropes.
+   - The **Y-pylon** style forks into two arms, one carrying each side's sheaves.
+
    **Modern MGD tube** (default for detachable chairs and gondolas, based on modern 8-person gondola pylons): a conical galvanised tube on a flange plate, a box crossarm, sheave trains of paired-wheel bogies on balancer beams, catwalks with railings, a caged ladder and a maintenance gantry.
 
    **Other pylon styles:** classic tube (cheapest), lattice truss (×1.5 cost, up to 1.6× taller) and portal frame (×1.3 cost, straddles wide ropes). Choose a style for the whole lift in its panel, or for a single pylon in the pylon editor. Each pylon carries sheave trains tilted to the rope angle, with more wheels where the rope bends more, and hold-down wheels above the rope where it bends upward over a pylon in a dip. Stations have concrete plinths, glass walls, gabled roofs in the lift's accent colour, a visible bullwheel and a boarding deck, and the bottom station has a machine house. Chairs and cabins can be painted in nine colours.

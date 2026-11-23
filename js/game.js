@@ -335,7 +335,7 @@ const Net = {
     if (p.charge > Game.money) return { ok: false, msg: 'Not enough money' };
     if (p.charge > 0) Game.spend(p.charge); else Game.money -= p.charge;
     l.opt.pylon = style;
-    if (l.customTowers) l.customTowers = l.customTowers.map((t) => ({ s: t.s, h: t.h }));
+    if (l.customTowers) l.customTowers = l.customTowers.map(({ type, ...rest }) => rest);   // keep wheels, lean, links
     this.group.remove(l.vis); Lifts.dispose(l.vis); Lifts.build(l); this.group.add(l.vis);
     return { ok: true, charge: p.charge };
   },
@@ -348,6 +348,8 @@ const Net = {
       if (t.type) o.type = t.type;
       if (t.wheels) o.wheels = t.wheels;
       if (t.mode && t.mode !== 'auto') o.mode = t.mode;
+      if (t.lean) o.lean = Math.round(t.lean * 10) / 10;
+      if (t.link) o.link = true;
       return o;
     });
     this.group.remove(l.vis); Lifts.dispose(l.vis);
