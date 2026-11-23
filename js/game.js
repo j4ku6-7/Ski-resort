@@ -3,7 +3,9 @@
 
 const TIME_SCALE = 30;                 // world seconds per real second at 1x
 const DAY_START = 8.5 * 3600, LAST_ARRIVAL = 14.5 * 3600, DAY_END = 16.5 * 3600;
-const SNAP = 70, RUN_WIDTH = 34, RUN_COST_PER_M = 25, RUN_OP_PER_M = 0.12;
+const SNAP = 70, RUN_WIDTH = 34, RUN_COST_PER_M = 25, RUN_OP_PER_M = 2;
+const FIXED_OP = 3000;                 // lodges, staff, ticket office per day
+const MAX_DEBT = 100000, DEBT_DAYS = 3, MIN_REP = 15;
 const TICKET = 38, START_MONEY = 650000, MAX_SKIERS = 1500;
 
 const DIFF = [
@@ -18,9 +20,9 @@ const SKILL = [
 ];
 const LIFT_TYPES = {
   chair: { name: 'Chairlift', baseCost: 20000, perM: 55, speed: 5, interval: 7, seats: 4, towerGap: 110,
-           towerH: 11, gauge: 4, maxLen: 2600, opBase: 400, opPerM: 0.35, station: 0x8a96a3 },
+           towerH: 11, gauge: 4, maxLen: 2600, opBase: 2500, opPerM: 1.5, station: 0x8a96a3 },
   gondola: { name: 'Gondola', baseCost: 60000, perM: 120, speed: 6, interval: 10, seats: 8, towerGap: 230,
-             towerH: 18, gauge: 6, maxLen: 6000, opBase: 900, opPerM: 0.7, station: 0xb83a32 },
+             towerH: 18, gauge: 6, maxLen: 6000, opBase: 5000, opPerM: 3, station: 0xb83a32 },
 };
 
 const fmt = (n) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
@@ -196,7 +198,7 @@ const Net = {
     });
   },
 
-  liftPlan(type, p, q) {
+  liftPlan(type, p, q, free = false) {
     const T = LIFT_TYPES[type];
     let a = p, b = q, ya = this.pointY(p), yb = this.pointY(q);
     if (yb < ya) { [a, b] = [b, a]; [ya, yb] = [yb, ya]; }
@@ -207,11 +209,11 @@ const Net = {
     else if (hl < 80) msg = 'Too short';
     else if (len > T.maxLen) msg = `Too long — a ${T.name.toLowerCase()} can be at most ${fmt(T.maxLen)} m`;
     else if (vert < 20) msg = 'A lift needs at least 20 m of climb';
-    else if (cost > Game.money) msg = 'Not enough money';
+    else if (!free && cost > Game.money) msg = 'Not enough money';
     return { ok: !msg, msg, a, b, hl, len, vert, cost, T, type };
   },
 
-  buildLift(plan) {
+  buildLift(plan, free = false) {
     const A = this.pointNode(plan.a), B = this.pointNode(plan.b), T = plan.T;
     const l = { kind: 'lift', id: this.seq.lift++, type: plan.type, T, a: A, b: B, len: plan.len, vert: plan.vert,
                 cost: plan.cost, queue: [], carriers: [], clock: 0, next: T.interval };
@@ -221,12 +223,12 @@ const Net = {
     l.label = Labels.add('', 'queue', { x: A.x, y: A.y + T.towerH + 26, z: A.z });
     A.lifts.push(l); B.lifts.push(l); this.lifts.push(l);
     Terrain.clearTrees([A, B], 14);
-    Game.spend(plan.cost);
+    if (!free) Game.spend(plan.cost);
     this.version++;
     return l;
   },
 
-  runPlan(points) {
+  runPlan(points, free = false) {
     if (points.length < 2) return { ok: false, msg: 'Click more points down the slope' };
     const dense = [];
     for (let i = 0; i < points.length - 1; i++) {
@@ -255,14 +257,14 @@ const Net = {
     if (drop < 25) msg = 'A run has to go downhill';
     else if (climb > 10) msg = `This line climbs ${Math.round(climb)} m uphill — follow the slope down`;
     else if (maxG > 0.9) msg = 'Too steep to groom (over 42°)';
-    else if (cost > Game.money) msg = 'Not enough money';
+    else if (!free && cost > Game.money) msg = 'Not enough money';
     return { ok: !msg, msg, dense, path, len, drop, maxG, diff, cost, points };
   },
 
-  buildRun(plan) {
+  buildRun(plan, free = false) {
     const A = this.pointNode(plan.points[0]), B = this.pointNode(plan.points[plan.points.length - 1]);
     const r = { kind: 'run', id: this.seq.run++, a: A, b: B, diff: plan.diff, path: plan.path, len: plan.len,
-                drop: plan.drop, maxG: plan.maxG, cost: plan.cost };
+                drop: plan.drop, maxG: plan.maxG, cost: plan.cost, points: plan.points.map((p) => ({ x: p.x, z: p.z })) };
     r.name = `Run ${r.id}`;
     r.vis = makeRibbon(plan.dense, DIFF[r.diff].color);
     this.group.add(r.vis);
@@ -270,8 +272,9 @@ const Net = {
     r.label = Labels.add(String(r.id), `run run-${r.diff}`, { x: s.x, y: s.y + 22, z: s.z });
     A.runs.push(r); B.runs.push(r); this.runs.push(r);
     Terrain.clearTrees(plan.dense, RUN_WIDTH * 0.65);
-    Game.spend(plan.cost);
     this.version++;
+    if (free) return r;
+    Game.spend(plan.cost);
     const fed = A.base || A.lifts.some((l) => l.b === A) || A.runs.some((x) => x.b === A);
     if (!fed) UI.toast('Nothing brings skiers to the top of this run yet — end a lift there.');
     return r;
@@ -316,6 +319,7 @@ const Game = {
     this.map = map; this.scene = scene;
     this.money = START_MONEY; this.day = 1; this.time = DAY_START; this.rep = 50;
     this.skiers = []; this.speed = 1; this.paused = false; this.dayOver = false; this.arrivalAcc = 0;
+    this.debtDays = 0; this.over = null;
     this.newDayStats();
     Net.reset(scene);
     for (const p of map.places) if (p.kind === 'base') Net.addNode(p.x, p.z, { base: true, name: p.name });
@@ -332,7 +336,7 @@ const Game = {
   },
 
   newDayStats() {
-    this.stats = { visitors: 0, revenue: 0, built: 0, left: 0, happySum: 0, angry: 0, stranded: 0 };
+    this.stats = { visitors: 0, revenue: 0, built: 0, left: 0, happySum: 0, angry: 0, stranded: 0, refunds: 0 };
     this.warned = {};
   },
 
@@ -351,7 +355,7 @@ const Game = {
   },
 
   update(dtReal) {
-    if (this.paused || this.dayOver) return;
+    if (this.paused || this.dayOver || this.over) return;
     let dt = dtReal * TIME_SCALE * this.speed;
     while (dt > 0 && !this.dayOver) { const h = Math.min(dt, 2); this.step(h); dt -= h; }
   },
@@ -439,7 +443,7 @@ const Game = {
     }
     if (!opts.length) {
       if (n.base) {
-        if (!s.done) { s.happy -= 50; this.warn('skill' + s.skill, `${sk.name} can't find anything to ski — they need ${sk.maxDiff ? 'easier' : 'blue'} runs from a lift.`); }
+        if (!s.done) { s.happy -= 50; this.money -= TICKET; this.stats.revenue -= TICKET; this.stats.refunds++; this.warn('skill' + s.skill, `${sk.name} can't find anything to ski — they need ${sk.maxDiff ? 'easier' : 'blue'} runs from a lift.`); }
         return this.leave(s);
       }
       return this.strand(s);
@@ -463,7 +467,7 @@ const Game = {
     if (s.state === 'queue' && s.edge) { const q = s.edge.queue, i = q.indexOf(s); if (i >= 0) q.splice(i, 1); }
     s.state = 'gone'; this._gone = true;
     s.happy = clamp(s.happy, 0, 100);
-    this.rep += (s.happy - this.rep) * 0.02;
+    this.rep += (s.happy - this.rep) * (s.happy < this.rep ? 0.03 : 0.015); // bad news travels faster
     this.stats.left++; this.stats.happySum += s.happy;
     if (s.happy < 35) this.stats.angry++;
   },
@@ -500,13 +504,55 @@ const Game = {
     for (const s of this.skiers) if (s.state !== 'gone') this.leave(s);
     this.skiers = [];
     for (const l of Net.lifts) { l.queue.length = 0; l.carriers.length = 0; }
-    let ops = 0;
-    for (const l of Net.lifts) ops += l.T.opBase + l.T.opPerM * l.len;
-    for (const r of Net.runs) ops += r.len * RUN_OP_PER_M;
+    const ops = this.dailyCost();
     this.money -= ops;
     this.stats.ops = ops;
     this.dayOver = true;
-    UI.daySummary(this.stats);
+    this.debtDays = this.money < 0 ? this.debtDays + 1 : 0;
+    if (this.money < -MAX_DEBT) this.over = `The bank called in your ${money(-this.money)} debt. The resort is bankrupt.`;
+    else if (this.debtDays >= DEBT_DAYS) this.over = `You were in debt for ${DEBT_DAYS} days in a row. The resort is bankrupt.`;
+    else if (this.rep < MIN_REP) this.over = 'Your reputation collapsed. Nobody wants to ski here any more.';
+    if (this.over) { Save.clear(this.map.key); Save.record(this.map.key, this.day); UI.gameOver(this.over, this.stats); }
+    else { Save.record(this.map.key, this.day); Save.write(); UI.daySummary(this.stats); }
+  },
+
+  dailyCost() {
+    let ops = Net.lifts.length || Net.runs.length ? FIXED_OP : 0;
+    for (const l of Net.lifts) ops += l.T.opBase + l.T.opPerM * l.len;
+    for (const r of Net.runs) ops += r.len * RUN_OP_PER_M;
+    return ops;
+  },
+
+  serialize() {
+    return {
+      v: 1, key: this.map.key, money: this.money, day: this.day, time: this.dayOver ? DAY_END : this.time,
+      rep: this.rep, debtDays: this.debtDays, stats: this.stats,
+      nodes: Net.nodes.filter((n) => !n.base).map((n) => ({ id: n.id, x: n.x, z: n.z })),
+      bases: Net.nodes.filter((n) => n.base).map((n) => ({ id: n.id, name: n.name })),
+      lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id })),
+      runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points })),
+    };
+  },
+
+  restore(d) {
+    const byId = new Map();
+    for (const b of d.bases) { const n = Net.nodes.find((x) => x.base && x.name === b.name); if (n) byId.set(b.id, n); }
+    for (const n of d.nodes) byId.set(n.id, Net.addNode(n.x, n.z));
+    const P = (n) => ({ x: n.x, z: n.z, node: n });
+    for (const l of d.lifts) {
+      const plan = Net.liftPlan(l.type, P(byId.get(l.a)), P(byId.get(l.b)), true);
+      if (plan.ok) Net.buildLift(plan, true);
+    }
+    for (const r of d.runs) {
+      const pts = r.points.map((p) => ({ ...p }));
+      pts[0].node = byId.get(r.a); pts[pts.length - 1].node = byId.get(r.b);
+      const plan = Net.runPlan(pts, true);
+      if (plan.dense) Net.buildRun(plan, true);
+    }
+    Net.pruneNodes();
+    Object.assign(this, { money: d.money, day: d.day, time: d.time, rep: d.rep, debtDays: d.debtDays || 0 });
+    if (d.stats) this.stats = Object.assign(this.stats, d.stats);
+    if (this.time >= DAY_END) this.nextDay();
   },
 
   nextDay() {
@@ -570,4 +616,16 @@ const Game = {
     if (sm.instanceColor) sm.instanceColor.needsUpdate = true;
     if (cm.instanceColor) cm.instanceColor.needsUpdate = true;
   },
+};
+
+// ---------- persistence (browser localStorage, one save per resort) ----------
+const Save = {
+  key: (k) => 'skiresort.save.' + k,
+  get(name) { try { return JSON.parse(localStorage.getItem(name)); } catch { return null; } },
+  set(name, v) { try { localStorage.setItem(name, JSON.stringify(v)); } catch { /* storage unavailable */ } },
+  read(k) { return this.get(this.key(k)); },
+  write() { if (Game.map && !Game.over) this.set(this.key(Game.map.key), Game.serialize()); },
+  clear(k) { try { localStorage.removeItem(this.key(k)); } catch { /* ignore */ } },
+  best(k) { return this.get('skiresort.best.' + k); },
+  record(k, days) { const b = this.best(k); if (!b || days > b.days) this.set('skiresort.best.' + k, { days }); },
 };

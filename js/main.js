@@ -14,14 +14,35 @@ const UI = {
     $('#summary-body').innerHTML = `
       <div class="row"><span>Visitors</span><b>${fmt(st.visitors)}</b></div>
       <div class="row"><span>Ticket sales</span><b class="pos">${money(st.revenue)}</b></div>
+      <div class="row"><span>Refunds (nothing to ski)</span><b>${fmt(st.refunds || 0)}</b></div>
       <div class="row"><span>Operating costs</span><b class="neg">${money(-st.ops)}</b></div>
       <div class="row"><span>Construction</span><b class="neg">${money(-st.built)}</b></div>
       <div class="row"><span>Average happiness</span><b>${Math.round(avg)}%</b></div>
       <div class="row"><span>Unhappy guests</span><b>${fmt(st.angry)}</b></div>
       <div class="row"><span>Stranded at dead ends</span><b>${fmt(st.stranded)}</b></div>
-      <div class="row"><span>Reputation</span><b>${Math.round(Game.rep)}%</b></div>`;
+      <div class="row"><span>Reputation</span><b>${Math.round(Game.rep)}%</b></div>
+      <div class="row"><span>Balance</span><b class="${Game.money < 0 ? 'neg' : ''}">${money(Game.money)}</b></div>` +
+      UI.dangers().map((d) => `<p class="danger">${d}</p>`).join('');
     $('#summary-title').textContent = `Day ${Game.day} is over`;
     $('#summary').hidden = false;
+  },
+  dangers() {
+    const out = [];
+    if (Game.money < 0) {
+      const left = DEBT_DAYS - Game.debtDays;
+      out.push(`⚠ You're in debt. Get back above €0 within ${left} day${left === 1 ? '' : 's'}, or go below ${money(-MAX_DEBT)}, and the resort goes bankrupt.`);
+    }
+    if (Game.rep < MIN_REP + 15) out.push(`⚠ Reputation is ${Math.round(Game.rep)}%. Below ${MIN_REP}% at the end of a day, the resort closes for good.`);
+    return out;
+  },
+  gameOver(reason, st) {
+    $('#over-reason').textContent = reason;
+    $('#over-body').innerHTML = `
+      <div class="row"><span>Days survived</span><b>${Game.day}</b></div>
+      <div class="row"><span>Lifts / runs built</span><b>${Net.lifts.length} / ${Net.runs.length}</b></div>
+      <div class="row"><span>Final balance</span><b class="neg">${money(Game.money)}</b></div>
+      <div class="row"><span>Best on this mountain</span><b>${(Save.best(Game.map.key) || { days: Game.day }).days} days</b></div>`;
+    $('#gameover').hidden = false;
   },
 };
 
@@ -33,16 +54,29 @@ const App = {
     for (const key of Object.keys(window.SKI_MAPS)) {
       const m = window.SKI_MAPS[key];
       const top = m.places.filter((p) => p.kind === 'peak').sort((a, b) => b.elev - a.elev)[0];
-      const b = document.createElement('button');
+      const save = Save.read(key), best = Save.best(key);
+      const b = document.createElement('div');
       b.className = 'card';
       b.innerHTML = `<span class="card-name">${m.name}</span><span class="card-region">${m.region}</span>
-        <span class="card-meta">▲ ${top.name} ${top.elev} m · ${((m.w * m.cell) / 1000).toFixed(1)} × ${((m.h * m.cell) / 1000).toFixed(1)} km of real terrain</span>`;
-      b.onclick = () => this.start(key);
+        <span class="card-meta">▲ ${top.name} ${top.elev} m · ${((m.w * m.cell) / 1000).toFixed(1)} × ${((m.h * m.cell) / 1000).toFixed(1)} km of real terrain` +
+        (best ? ` · best: ${best.days} days` : '') + `</span>
+        <span class="card-actions">` +
+        (save ? `<button class="primary" data-act="continue">Continue · Day ${save.day} · ${money(save.money)}</button>` : '') +
+        `<button class="${save ? '' : 'primary'}" data-act="new">New game</button></span>`;
+      b.querySelector('[data-act="new"]').onclick = () => {
+        if (save && !b.classList.contains('confirm')) {
+          b.classList.add('confirm');
+          b.querySelector('[data-act="new"]').textContent = 'Overwrite save? Click again';
+          return;
+        }
+        Save.clear(key); this.start(key, null);
+      };
+      if (save) b.querySelector('[data-act="continue"]').onclick = () => this.start(key, save);
       menu.appendChild(b);
     }
   },
 
-  start(key) {
+  start(key, save) {
     const map = window.SKI_MAPS[key];
     $('#menu').hidden = true; $('#hud').hidden = false;
     Terrain.load(map);
@@ -68,6 +102,7 @@ const App = {
         { x: p.x, y: Terrain.height(p.x, p.z) + 30, z: p.z });
     }
     Game.init(map, scene);
+    if (save) Game.restore(save);
 
     // camera: look from below the lowest lodge up toward the highest peak
     const camera = this.camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 5, 60000);
@@ -101,7 +136,10 @@ const App = {
     addEventListener('resize', () => {
       camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
     });
-    UI.toast('Build a lift from a lodge (⌂) up the mountain, then draw a run back down to open the resort.');
+    if (save) UI.toast(`Welcome back: day ${Game.day}, ${money(Game.money)}.`);
+    else UI.toast('Build a lift from a lodge (⌂) up the mountain, then draw a run back down to open the resort.');
+    setInterval(() => Save.write(), 20000);
+    addEventListener('beforeunload', () => Save.write());
     requestAnimationFrame(() => this.loop());
   },
 
@@ -120,8 +158,10 @@ const App = {
 
     for (const b of document.querySelectorAll('[data-tool]')) b.onclick = () => this.setTool(b.dataset.tool);
     for (const b of document.querySelectorAll('[data-speed]')) b.onclick = () => this.setSpeed(+b.dataset.speed);
-    $('#next-day').onclick = () => { $('#summary').hidden = true; Game.nextDay(); };
-    $('#to-menu').onclick = () => location.reload();
+    $('#next-day').onclick = () => { $('#summary').hidden = true; Game.nextDay(); Save.write(); };
+    $('#retry').onclick = () => { Save.clear(Game.map.key); location.search = '?new=' + Game.map.key; };
+    $('#over-menu').onclick = () => location.replace(location.pathname);
+    $('#to-menu').onclick = () => { Save.write(); location.replace(location.pathname); };
     $('#finish-run').onclick = () => this.finishRun();
 
     addEventListener('keydown', (e) => {
@@ -256,7 +296,7 @@ const App = {
     const h = this.hover, t = this.tool, d = this.draft;
     if (t === 'bulldoze') {
       const e = h && Net.edgeNear(h.x, h.z);
-      if (e) { Net.remove(e); UI.toast(`Removed ${e.name}`); }
+      if (e) { Net.remove(e); UI.toast(`Removed ${e.name}`); Save.write(); }
     } else if ((t === 'chair' || t === 'gondola') && h) {
       if (!d.a) d.a = { ...h };
       else {
@@ -264,6 +304,7 @@ const App = {
         if (!plan.ok) return UI.toast(plan.msg);
         const l = Net.buildLift(plan);
         UI.toast(`${l.name} ${l.T.name} built for ${money(plan.cost)}`);
+        Save.write();
         this.draft = { a: null };
       }
     } else if (t === 'run' && h) {
@@ -282,6 +323,7 @@ const App = {
     if (!plan.ok) { d.pts.pop(); this.updateHover(); return UI.toast(plan.msg); }
     const r = Net.buildRun(plan);
     UI.toast(`${r.name} (${DIFF[r.diff].name}) built for ${money(plan.cost)}`);
+    Save.write();
     this.draft = { pts: [] };
     this.updateHover();
   },
@@ -313,6 +355,11 @@ const App = {
     const a = Game.avgHappy();
     $('#happy').textContent = a === null ? '—' : `${a > 70 ? '😀' : a > 45 ? '🙂' : '😟'} ${Math.round(a)}%`;
     $('#rep').textContent = `${Math.round(Game.rep)}%`;
+    $('#rep').classList.toggle('neg', Game.rep < MIN_REP + 15);
+    $('#costs').textContent = money(-Game.dailyCost());
+    const danger = UI.dangers()[0];
+    $('#danger').hidden = !danger || Game.dayOver;
+    if (danger) $('#danger').textContent = danger;
     $('#status').textContent = Game.open ? (Game.time < LAST_ARRIVAL ? `${Math.round(Game.demandPerHour())} arrivals/h` : 'Ticket office closed') : 'Closed — build a lift and a run';
     for (const l of Net.lifts) {
       const q = l.queue.length;
@@ -322,4 +369,8 @@ const App = {
   },
 };
 
-addEventListener('DOMContentLoaded', () => App.init());
+addEventListener('DOMContentLoaded', () => {
+  App.init();
+  const again = new URLSearchParams(location.search).get('new');
+  if (again && window.SKI_MAPS[again]) { history.replaceState(null, '', location.pathname); App.start(again, null); }
+});

@@ -80,3 +80,20 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 .label.run-0 { background: #2f7de1; }
 .label.run-1 { background: #e0393e; }
 .label.run-2 { background: #18181c; }
+
+/* ---------- game state ---------- */
+.rules { font-size: 13px; opacity: .8; margin: -14px auto 24px; max-width: 520px; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.card-actions button { border: 1px solid rgba(255,255,255,.5); background: transparent; color: #fff; padding: 7px 14px; border-radius: 8px; }
+.card-actions button.primary { background: #fff; color: #1b2430; border-color: #fff; font-weight: 700; }
+.card.confirm [data-act="new"] { background: #ff4d4d; border-color: #ff4d4d; color: #fff; }
+#danger { position: fixed; left: 50%; top: 82px; transform: translateX(-50%); max-width: min(620px, 80vw);
+  padding: 8px 14px; border-radius: 10px; background: #c62f2f; color: #fff; font-weight: 600; font-size: 13px; text-align: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,.2); }
+.danger { margin: 12px 0 0; padding: 9px 11px; border-radius: 8px; background: #fde8e8; color: #9b1c1c; font-size: 13px; }
+#gameover { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(40,8,8,.6); z-index: 5; }
+#over-reason { margin: 0 0 12px; color: #9b1c1c; font-weight: 600; }
+.btns { display: flex; gap: 8px; margin-top: 16px; }
+.btns button { flex: 1; padding: 11px; border: 0; border-radius: 10px; background: #1f6feb; color: #fff; font-weight: 700; }
+.btns button.ghost { background: #e8eef5; color: #1b2430; }
+#tools .legend { color: #1b2430; }

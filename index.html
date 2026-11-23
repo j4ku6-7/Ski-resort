@@ -14,6 +14,7 @@
   <div class="menu-inner">
     <h1>Ski Resort</h1>
     <p class="sub">Build lifts and runs on real mountains. Terrain from real elevation data.</p>
+    <p class="rules">Keep your guests happy and your books in the black. You lose if you're in debt for 3 days in a row, owe more than €100 000, or your reputation falls below 15%. Progress saves automatically in this browser.</p>
     <div id="resorts"></div>
     <p class="foot">Elevation data: AWS Terrain Tiles (Mapzen / SRTM and others).</p>
   </div>
@@ -27,6 +28,7 @@
     <span class="stat"><i>On slopes</i><b id="guests"></b></span>
     <span class="stat"><i>Happiness</i><b id="happy"></b></span>
     <span class="stat"><i>Reputation</i><b id="rep"></b></span>
+    <span class="stat"><i>Costs / day</i><b id="costs"></b></span>
     <span class="stat wide"><i>Status</i><b id="status"></b></span>
     <span class="speed">
       <button data-speed="0" title="Pause (Space)">❚❚</button>
@@ -54,6 +56,7 @@
     </div>
   </nav>
 
+  <div id="danger" hidden></div>
   <div id="hintbar"><span id="hint"></span><button id="finish-run" hidden>Finish run ⏎</button></div>
   <div id="tooltip" hidden></div>
   <div id="toasts"></div>
@@ -64,6 +67,15 @@
       <div id="summary-body"></div>
       <button id="next-day">Start next day</button>
     </div>
+  </div>
+</div>
+
+<div id="gameover" hidden>
+  <div class="panel">
+    <h2>Game over</h2>
+    <p id="over-reason"></p>
+    <div id="over-body"></div>
+    <div class="btns"><button id="retry">Try again</button><button id="over-menu" class="ghost">Choose resort</button></div>
   </div>
 </div>
 
