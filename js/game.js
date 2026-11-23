@@ -190,7 +190,7 @@ function makeNodeVisual(n) {
 // ---------- network ----------
 const Net = {
   reset(scene) {
-    this.nodes = []; this.lifts = []; this.runs = [];
+    this.nodes = []; this.lifts = []; this.runs = []; this.paths = [];
     this.seq = { lift: 1, run: 1, node: 1 }; this.version = 0;
     this.group = new THREE.Group(); scene.add(this.group);
   },
@@ -202,28 +202,53 @@ const Net = {
   },
 
   addNode(x, z, opts = {}) {
-    const n = Object.assign({ id: this.seq.node++, x, z, y: Terrain.height(x, z), base: false, name: null, lifts: [], runs: [] }, opts);
+    const n = Object.assign({ id: this.seq.node++, x, z, y: Terrain.height(x, z), base: false, name: null, lifts: [], runs: [], links: [] }, opts);
     n.vis = makeNodeVisual(n); this.group.add(n.vis);
     if (n.base) n.label = Labels.add(`<span class="ico">⌂</span>${n.name}`, 'base', { x: n.x, y: n.y + 40, z: n.z });
     this.nodes.push(n);
     return n;
   },
 
-  pointNode(p) { return p.node || this.addNode(p.x, p.z); },
+  pointNode(p) {
+    if (p.node) return p.node;
+    const n = this.addNode(p.x, p.z);
+    if (p.linkTo) this.linkNodes(n, p.linkTo);
+    p.node = n;
+    return n;
+  },
   pointY(p) { return p.node ? p.node.y : Terrain.height(p.x, p.z); },
 
   pruneNodes() {
     this.nodes = this.nodes.filter((n) => {
       if (n.base || n.lifts.length || n.runs.length) return true;
+      this.unlinkNode(n);
       this.group.remove(n.vis); return false;
     });
   },
 
-  liftPlan(type, p, q, free = false, manual = false) {
+  liftPlan(type, p, q, free = false, manual = false, place = true) {
     type = LIFT_ALIASES[type] || type;
     const T = LIFT_TYPES[type];
     let a = p, b = q, ya = this.pointY(p), yb = this.pointY(q);
     if (yb < ya) { [a, b] = [b, a]; [ya, yb] = [yb, ya]; }
+    // starting at the top of (or ending at the bottom of) a lift of the same type continues that line,
+    // through a shared angle station
+    let joinWith = null, bendDeg = 0;
+    if (Lifts.canHaveStations(T)) {
+      if (a.node) joinWith = this.lifts.find((x) => x.type === type && x.b === a.node && !Lifts.partnerAbove(x));
+      if (!joinWith && b.node) joinWith = this.lifts.find((x) => x.type === type && x.a === b.node && !Lifts.partnerBelow(x));
+      if (joinWith) {
+        const h0 = Math.hypot(b.x - a.x, b.z - a.z) || 1, dx = (b.x - a.x) / h0, dz = (b.z - a.z) / h0, j = joinWith.dir;
+        bendDeg = Math.acos(clamp(dx * j.ux + dz * j.uz, -1, 1)) * 180 / Math.PI;
+      }
+    }
+    // don't build a station on top of a lodge or another station: move it to free ground next to it
+    if (place) {
+      const shared = (pt) => joinWith && pt.node && (joinWith.a === pt.node || joinWith.b === pt.node);
+      if (!shared(a)) a = this.freeStationSpot(T, a, b, true);
+      if (!shared(b)) b = this.freeStationSpot(T, b, a, false);
+      ya = this.pointY(a); yb = this.pointY(b);
+    }
     const hl = Math.hypot(b.x - a.x, b.z - a.z), vert = yb - ya, len = Math.hypot(hl, vert);
     const P = Lifts.profile(T, a, ya, b, yb, manual && T.kind !== 'belt' ? [] : null);
     const trees = Terrain.treesNear([a, b], T.gauge + 8).length;
@@ -232,17 +257,6 @@ const Net = {
     const build = T.baseCost + T.perM * len + towersCost, cost = build + trees * TREE_COST;
     const grade = T.kind === 'belt' || T.kind === 'surface' ? Lifts.maxGroundGrade(P) : 0;
     const aName = (/^[aeiou8]/i.test(T.name) ? 'An ' : 'A ') + T.name.toLowerCase();
-    // starting at the top of (or ending at the bottom of) a lift of the same type continues that line,
-    // through a shared angle station
-    let joinWith = null, bendDeg = 0;
-    if (Lifts.canHaveStations(T)) {
-      if (a.node) joinWith = this.lifts.find((x) => x.type === type && x.b === a.node && !Lifts.partnerAbove(x));
-      if (!joinWith && b.node) joinWith = this.lifts.find((x) => x.type === type && x.a === b.node && !Lifts.partnerBelow(x));
-      if (joinWith) {
-        const dx = (b.x - a.x) / (hl || 1), dz = (b.z - a.z) / (hl || 1), j = joinWith.dir;
-        bendDeg = Math.acos(clamp(dx * j.ux + dz * j.uz, -1, 1)) * 180 / Math.PI;
-      }
-    }
     let msg = null;
     if (a.node && a.node === b.node) msg = 'Both ends are on the same spot';
     else if (hl < T.minLen) msg = `Too short. ${aName} needs at least ${T.minLen} m`;
@@ -255,6 +269,59 @@ const Net = {
     return { ok: !msg, msg, a, b, hl, len, vert, cost: cost - shared, build: build - shared, trees, towers: P.towers, T, type,
              manual: manual && T.kind !== 'belt', joinWith, bendDeg };
   },
+
+  // Buildings already standing: lodges and every lift station (planned ones too).
+  footprints() {
+    const out = [];
+    for (const n of this.nodes) if (n.base) out.push(Lifts.lodgeFootprint(n));
+    for (const l of this.lifts) {
+      out.push(Lifts.stationFootprint(l.T, l.a, l.dir.ux, l.dir.uz, true));
+      out.push(Lifts.stationFootprint(l.T, l.b, l.dir.ux, l.dir.uz, false));
+    }
+    return out;
+  },
+
+  // If the station at point `pt` (towards `other`) would overlap a building, find the nearest free
+  // spot around it (sideways first) and return it linked to the original node by a footpath.
+  freeStationSpot(T, pt, other, bottom) {
+    const fps = this.footprints();
+    const fpAt = (x, z) => {
+      const dx = other.x - x, dz = other.z - z, d = Math.hypot(dx, dz) || 1;
+      return Lifts.stationFootprint(T, { x, z }, dx / d, dz / d, bottom);
+    };
+    const clashes = (x, z) => { const f = fpAt(x, z); return fps.some((g) => Lifts.overlaps(f, g)); };
+    if (!clashes(pt.x, pt.z)) return pt;
+    const d0 = Math.hypot(other.x - pt.x, other.z - pt.z) || 1, ux = (other.x - pt.x) / d0, uz = (other.z - pt.z) / d0;
+    for (const dist of [30, 42, 55, 70, 88, 110, 135, 160]) {
+      for (const deg of [90, -90, 60, -60, 120, -120, 30, -30, 150, -150, 0, 180]) {
+        const r = deg * Math.PI / 180, dx = ux * Math.cos(r) - uz * Math.sin(r), dz = ux * Math.sin(r) + uz * Math.cos(r);
+        const x = pt.x + dx * dist, z = pt.z + dz * dist;
+        if (!Terrain.inside(x, z) || clashes(x, z)) continue;
+        return { x, z, linkTo: pt.node || null, moved: true };
+      }
+    }
+    return pt;
+  },
+
+  // footpath between a moved station and the node it belongs to; skiers walk it freely
+  linkNodes(a, b) {
+    if (!a || !b || a === b || a.links.includes(b)) return;
+    a.links.push(b); b.links.push(a);
+    const pts = [], n = Math.max(2, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 6));
+    for (let k = 0; k <= n; k++) { const x = a.x + ((b.x - a.x) * k) / n, z = a.z + ((b.z - a.z) * k) / n; pts.push({ x, y: Terrain.height(x, z), z }); }
+    const vis = makeRibbon(pts, 0x8d7a66, 0.85, 6);
+    this.group.add(vis);
+    this.paths.push({ a, b, vis });
+  },
+  unlinkNode(n) {
+    for (const m of n.links) m.links = m.links.filter((x) => x !== n);
+    n.links = [];
+    this.paths = this.paths.filter((p) => {
+      if (p.a !== n && p.b !== n) return true;
+      this.group.remove(p.vis); disposeGroup(p.vis); return false;
+    });
+  },
+  hubOf(n) { return n.links && n.links.length ? [n, ...n.links] : [n]; },
 
   buildLift(plan, free = false, opt = null, name = null) {
     this.resolveJunction(plan.a); this.resolveJunction(plan.b);
@@ -288,6 +355,11 @@ const Net = {
     for (const n of this.nodes) {
       n.y = Terrain.height(n.x, n.z); n.vis.position.y = n.y;
       if (n.label) n.label.pos.y = n.y + 40;
+    }
+    for (const p of this.paths.splice(0)) {          // footpaths follow the new ground
+      this.group.remove(p.vis); disposeGroup(p.vis);
+      p.a.links = p.a.links.filter((x) => x !== p.b); p.b.links = p.b.links.filter((x) => x !== p.a);
+      this.linkNodes(p.a, p.b);
     }
     for (const r of this.runs) {
       if (!(r.planned && r.gradeDeg)) for (const p of r.dense) p.y = Terrain.height(p.x, p.z);   // graded plans keep their target
@@ -333,13 +405,13 @@ const Net = {
     this.evacuate(l);
     const M = this.addNode(plan.x, plan.z);
     const top = l.b, P = (n) => ({ x: n.x, z: n.z, node: n });
-    const p2 = this.liftPlan(l.type, P(M), P(top), true);
+    const p2 = this.liftPlan(l.type, P(M), P(top), true, false, false);
     p2.planned = l.planned;
     if (l.customTowers) p2.customTowers = l.customTowers.filter((t) => t.s > s + 20).map((t) => ({ ...t, s: t.s - s }));
     // shorten l to the lower section
     top.lifts = top.lifts.filter((x) => x !== l);
     l.b = M; M.lifts.push(l);
-    const p1 = this.liftPlan(l.type, P(l.a), P(M), true);
+    const p1 = this.liftPlan(l.type, P(l.a), P(M), true, false, false);
     if (l.customTowers) l.customTowers = l.customTowers.filter((t) => t.s < s - 20);
     l.len = p1.len; l.vert = p1.vert;
     l.line = l.line || this.newLine();
@@ -358,7 +430,7 @@ const Net = {
     if (!low || !up) return { ok: false, msg: 'This is not a station on a lift line' };
     if (node.runs.length || node.lifts.length > 2) return { ok: false, msg: 'Runs or other lifts use this station; remove them first' };
     const P = (n) => ({ x: n.x, z: n.z, node: n });
-    const plan = this.liftPlan(low.type, P(low.a), P(up.b), true);
+    const plan = this.liftPlan(low.type, P(low.a), P(up.b), true, false, false);
     if (!plan.ok) return plan;
     this.evacuate(low); this.evacuate(up);
     this.lifts.splice(this.lifts.indexOf(up), 1);
@@ -383,7 +455,7 @@ const Net = {
   upgradePlan(l, type) {
     if (l.line && this.lineOf(l).length > 1) return { ok: false, msg: 'Remove the stations on this line before changing its type', cost: 0 };
     const P = (n) => ({ x: n.x, z: n.z, node: n });
-    const plan = this.liftPlan(type, P(l.a), P(l.b), true);
+    const plan = this.liftPlan(type, P(l.a), P(l.b), true, false, false);
     plan.cost = l.planned ? 0 : Math.max(0, plan.cost - l.cost * 0.5);
     if (plan.ok && plan.cost > Game.money) { plan.ok = false; plan.msg = 'Not enough money'; }
     return plan;
@@ -801,9 +873,10 @@ const Game = {
   },
 
   reach(node, skill) {
-    const seen = new Set([node]), q = [node], max = SKILL[skill].maxDiff;
+    const seen = new Set(Net.hubOf(node)), q = [...seen], max = SKILL[skill].maxDiff;
     while (q.length) {
       const n = q.shift();
+      for (const m of n.links) if (!seen.has(m)) { seen.add(m); q.push(m); }
       for (const r of n.runs) if (r.a === n && !r.planned && r.diff <= max) return true;
       for (const l of n.lifts) if (l.a === n && l.opt.open && !l.planned && !seen.has(l.b)) { seen.add(l.b); q.push(l.b); }
     }
@@ -816,24 +889,24 @@ const Game = {
     return l._u[skill];
   },
 
-  canStart(n, skill) {
-    return n.runs.some((r) => r.a === n && !r.planned && r.diff <= SKILL[skill].maxDiff) ||
-           n.lifts.some((l) => l.a === n && l.opt.open && this.liftUseful(l, skill));
+  canStart(n0, skill) {
+    return Net.hubOf(n0).some((n) => n.runs.some((r) => r.a === n && !r.planned && r.diff <= SKILL[skill].maxDiff) ||
+           n.lifts.some((l) => l.a === n && l.opt.open && !l.planned && this.liftUseful(l, skill)));
   },
 
   decide(s) {
-    const n = s.node, sk = SKILL[s.skill], tired = s.done >= s.want;
-    if (n.base && tired) return this.leave(s);
+    const n = s.node, sk = SKILL[s.skill], tired = s.done >= s.want, hubs = Net.hubOf(n), atBase = hubs.some((h) => h.base);
+    if (atBase && tired) return this.leave(s);
     if (s.done >= s.want + 4) return this.leave(s);
     const opts = [];
-    for (const r of n.runs) {
-      if (r.a !== n || r.planned || r.diff > sk.maxDiff) continue;
+    for (const h of hubs) for (const r of h.runs) {
+      if (r.a !== h || r.planned || r.diff > sk.maxDiff) continue;
       let w = 1 + sk.pref[r.diff] + (r !== s.last ? 2 : 0);
       if (tired && r.b.base) w *= 4;
       opts.push([r, w]);
     }
-    for (const l of n.lifts) {
-      if (l.a !== n || !l.opt.open || !this.liftUseful(l, s.skill)) continue;
+    for (const h of hubs) for (const l of h.lifts) {
+      if (l.a !== h || !l.opt.open || l.planned || !this.liftUseful(l, s.skill)) continue;
       // pick by expected wait + ride time; beginners avoid T-bars, everyone likes a warm cabin
       let w = 3 / (1 + (Lifts.waitTime(l) + Lifts.rideTime(l) * 0.3) / 300);
       if (l.T.beginnerPenalty && s.skill === 0) w *= 0.3;
@@ -842,7 +915,7 @@ const Game = {
       opts.push([l, w]);
     }
     if (!opts.length) {
-      if (n.base) {
+      if (atBase) {
         if (!s.done) { s.happy -= 50; this.money -= TICKET; this.stats.revenue -= TICKET; this.stats.refunds++; this.warn('skill' + s.skill, `${sk.name} can't find anything to ski — they need ${sk.maxDiff ? 'easier' : 'blue'} runs from a lift.`); }
         return this.leave(s);
       }
@@ -889,7 +962,7 @@ const Game = {
         const steep = clamp(-p.dy / Math.max(0.2, Math.hypot(p.dx, p.dz)), 0, 1);
         s.d += SKILL[s.skill].speed * s.pace * (0.75 + 0.7 * Math.min(1, steep / 0.4)) * dt;
         if (s.d >= r.path.length) {
-          const junction = !r.b.base && !r.b.lifts.some((x) => !x.planned) && r.b.runs.some((x) => x.a === r.b && !x.planned);
+          const hb = Net.hubOf(r.b), junction = !hb.some((h) => h.base || h.lifts.some((x) => !x.planned)) && r.b.runs.some((x) => x.a === r.b && !x.planned);
           const lean = Math.max(0, r.cross - 0.3) * (s.skill === 0 ? 30 : 15);   // tilted side-hill piste
           // enjoyment scales with the vertical skied, so splitting a piste into segments changes nothing
           const share = clamp(r.drop / 300, 0.25, 1.5);
@@ -938,7 +1011,7 @@ const Game = {
     return {
       v: 1, key: this.map.key, money: this.money, day: this.day, time: this.dayOver ? DAY_END : this.time,
       rep: this.rep, debtDays: this.debtDays, stats: this.stats,
-      nodes: Net.nodes.filter((n) => !n.base).map((n) => ({ id: n.id, x: n.x, z: n.z })),
+      nodes: Net.nodes.filter((n) => !n.base).map((n) => (n.links.length ? { id: n.id, x: n.x, z: n.z, links: n.links.map((m) => m.id) } : { id: n.id, x: n.x, z: n.z })),
       bases: Net.nodes.filter((n) => n.base).map((n) => ({ id: n.id, name: n.name })),
       lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id, opt: l.opt, name: l.name, towers: l.customTowers, planned: l.planned || undefined, line: l.line || undefined })),
       runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points, gradeDeg: r.gradeDeg, diff: r.diff, maxG: r.maxG, piste: r.piste, planned: r.planned || undefined })),
@@ -954,9 +1027,10 @@ const Game = {
     const byId = new Map();
     for (const b of d.bases) { const n = Net.nodes.find((x) => x.base && x.name === b.name); if (n) byId.set(b.id, n); }
     for (const n of d.nodes) byId.set(n.id, Net.addNode(n.x, n.z));
+    for (const n of d.nodes) for (const m of n.links || []) if (byId.get(m)) Net.linkNodes(byId.get(n.id), byId.get(m));
     const P = (n) => ({ x: n.x, z: n.z, node: n });
     for (const l of d.lifts) {
-      const plan = Net.liftPlan(l.type, P(byId.get(l.a)), P(byId.get(l.b)), true);
+      const plan = Net.liftPlan(l.type, P(byId.get(l.a)), P(byId.get(l.b)), true, false, false);
       if (l.towers) plan.customTowers = l.towers;
       plan.planned = !!l.planned;
       plan.joinWith = null; plan.line = l.line || null;

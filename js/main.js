@@ -407,6 +407,7 @@ const App = {
         this.liftLine.visible = true;
         const cap = (T.seats / (T.kind === 'tram' ? 2 * (plan.len / T.speed + T.dwell) : T.interval)) * 3600;
         hint = (plan.joinWith ? `<b class="join">Continues ${plan.joinWith.name} through an ${plan.bendDeg > 3 ? `angle station (turns ${Math.round(plan.bendDeg)}°)` : 'intermediate station'}</b> · ` : '') +
+          (plan.a.moved || plan.b.moved ? '<span class="dim">Station moved next to the existing building, joined by a footpath</span> · ' : '') +
           `${fmt(plan.len)} m · climbs ${fmt(plan.vert)} m · ${plan.towers} towers · ${fmt(cap)} skiers/h · ride ${(plan.len / T.speed / 60).toFixed(1)} min · <b>${money(plan.cost)}</b>` +
           (plan.trees ? ` <span class="dim">(incl. ${plan.trees} trees to fell)</span>` : '') +
           (plan.ok ? ' — click to build' : ` — <span class="neg">${plan.msg}</span>`) + ' · Esc to cancel';

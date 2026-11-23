@@ -40,6 +40,8 @@ The terrain is real elevation data (AWS Terrain Tiles, about 20 m resolution), b
 
    Inspection fails a pylon whose rope bends too much per wheel, a rope that would lift off support-only wheels, and a rope that presses down on top-only wheels. Extra wheels cost money. The side view draws every wheel and marks a failing pylon in red.
 
+   **No overlapping buildings:** if a new station would overlap a lodge or another station, it is placed on the nearest free ground beside it (sideways first) and joined to the original spot by a footpath. Skiers walk the footpath freely, so lifts and runs at either end are all reachable.
+
    **Mid-stations and angle stations** (detachable chairs and gondolas):
    - *Add a station on this line* in the lift panel, then click the line, places an intermediate station where skiers can get on and off, or stay on and ride through.
    - Starting a new lift of the same type at the top of an existing one, or ending one at its bottom, continues the line through an **angle station**, which can turn it by up to 90°. The shared building saves 40% of a terminal.

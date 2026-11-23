@@ -725,7 +725,8 @@ const Lifts = {
       if (p.ypair === 'a') this._twinHead(parts, FL, l, t, reach);
     } else if (p.ypair) {
       // Y-pylon: one foundation and trunk, two standard pylon branches splayed along the line, each with a head
-      const hf = Math.max(3, Math.min(H * 0.3, 14)), rb = 1.5 + H * 0.018;
+      // the fork height comes from the pylon's own height, so both branches start from the same fork
+      const yh = p.yH || H, hf = Math.max(3, Math.min(yh * 0.3, 14)), rb = 1.5 + yh * 0.018;
       // a leaning Y: the trunk is rotated about the foot, so the fork sits off the foot along the line
       const fz = p.yShift && p.yH ? (p.yShift * hf) / p.yH : 0, Lt = Math.hypot(hf, fz);
       const FT = F.clone().multiply(new THREE.Matrix4().makeRotationX(Math.atan2(fz, hf)));
@@ -740,7 +741,8 @@ const Lifts = {
       const hb = Math.max(1, H - hf), db = dz - fz, Lb = Math.hypot(hb, db);
       const FB = F.clone().multiply(new THREE.Matrix4().makeTranslation(0, hf, fz)).multiply(new THREE.Matrix4().makeRotationX(Math.atan2(db, hb)));
       this._cyl(parts, 'galv', FB, 0.85, 1.1, Lb - 0.4, 0, 0, 0, 18);                            // branch tube
-      head(FB, Lb);
+      // the head on each branch stays level: both heads carry the same rope through one sheave train
+      head(F.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, dz)), H);
     } else if (style === 'mgd') {
       const rb = 1.25 + H * 0.018, rt = 0.85;
       this._box(parts, 'concrete', F, 5, 1.8, 5, 0, 0.1, 0);                                    // foundation
@@ -862,6 +864,30 @@ const Lifts = {
     for (const sx of [-1, 1]) this._box(parts, 'accent', F, 0.6, 1.6, L + 2, sx * (W / 2 + 0.2), eave - 0.6, zc);
     for (const sx of [-1, 1]) this._box(parts, 'roof', F, half + 0.5, 0.7, L + 3, sx * half / 2 * Math.cos(pitch), eave + 0.3 + half / 2 * Math.sin(pitch), zc, 0, -sx * pitch);
     this._box(parts, 'accent', F, 1.2, 1, L + 3.4, 0, eave + 0.6 + half * Math.sin(pitch), zc);
+  },
+
+  // Ground footprint of a station (an oriented rectangle in x/z) for overlap checks. `bottom`: the
+  // drive station, whose building extends behind the line; top stations extend ahead of it.
+  stationFootprint(T, at, ux, uz, bottom) {
+    const g = T.gauge, ext = Math.max(0, ...(T.ropes || [0]).map(Math.abs)), o = bottom ? -1 : 1;
+    let back = 8, ahead = 8, hw = 8;                          // extent behind / ahead (along o) and half width
+    if (T.kind === 'belt') { back = 3; ahead = 12; hw = 12; }
+    else if (T.kind === 'surface') { back = 6; ahead = 14; hw = g + 15; }
+    else if (T.kind === 'tram') { back = 7; ahead = 44; hw = g + 14; }
+    else if (T.station3d === 'fixed') { back = 10; ahead = 9; hw = g + 12; }
+    else { const L = T.model === 'cabin3s' || T.model === 'funitel' ? 62 : T.enclosed ? 50 : 42; back = 9; ahead = L - 8 + (bottom ? 13 : 0); hw = (g + ext) + 7; }
+    const mid = o * (ahead - back) / 2;                       // centre offset along the line
+    return { cx: at.x + ux * mid, cz: at.z + uz * mid, ux, uz, hl: (ahead + back) / 2, hw };
+  },
+  lodgeFootprint(n) { return { cx: n.x, cz: n.z, ux: 1, uz: 0, hl: 24, hw: 16 }; },
+  // separating-axis test for two oriented rectangles (with a little breathing room)
+  overlaps(A, B, gap = 3) {
+    for (const [ax, az] of [[A.ux, A.uz], [-A.uz, A.ux], [B.ux, B.uz], [-B.uz, B.ux]]) {
+      const r = (F) => Math.abs(F.ux * ax + F.uz * az) * F.hl + Math.abs(-F.uz * ax + F.ux * az) * F.hw;
+      const d = Math.abs((B.cx - A.cx) * ax + (B.cz - A.cz) * az);
+      if (d > r(A) + r(B) + gap) return false;
+    }
+    return true;
   },
 
   canHaveStations(T) { return T.kind === 'aerial' && T.station3d !== 'fixed'; },
