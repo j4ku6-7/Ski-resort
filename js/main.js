@@ -125,6 +125,9 @@ const App = {
     this.snapRing = new THREE.Mesh(new THREE.RingGeometry(SNAP - 8, SNAP, 40).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0x3dff9a, depthTest: false, transparent: true, opacity: 0.8 }));
     this.snapRing.renderOrder = 10; scene.add(this.snapRing);
+    this.joinRing = new THREE.Mesh(new THREE.RingGeometry(RUN_WIDTH / 2 + 2, RUN_WIDTH / 2 + 9, 40).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x35e0ff, depthTest: false, transparent: true, opacity: 0.9 }));
+    this.joinRing.renderOrder = 10; this.joinRing.visible = false; scene.add(this.joinRing);
     this.liftLine = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false }));
     this.liftLine.renderOrder = 11; this.liftLine.visible = false; scene.add(this.liftLine);
 
@@ -266,13 +269,17 @@ const App = {
     if (!this.camera) return;
     const hit = this.pickTerrain();
     const building = this.tool === 'lift' || this.tool === 'run';
-    this.hover = null; this.snapRing.visible = false; this.cursor.visible = !!hit;
+    this.hover = null; this.snapRing.visible = false; this.joinRing.visible = false; this.cursor.visible = !!hit;
     $('#tooltip').hidden = true;
     if (hit) {
       const node = building ? Net.nearestNode(hit.x, hit.z) : null;
-      this.hover = node ? { x: node.x, z: node.z, y: node.y, node } : hit;
+      const junction = building && !node ? Net.nearestRunPoint(hit.x, hit.z) : null;
+      this.hover = node ? { x: node.x, z: node.z, y: node.y, node }
+        : junction ? { x: junction.x, z: junction.z, y: junction.y, junction } : hit;
       this.cursor.position.set(hit.x, hit.y + 3, hit.z);
       if (node) { this.snapRing.visible = true; this.snapRing.position.set(node.x, node.y + 3, node.z); }
+      this.joinRing.visible = !!junction;
+      if (junction) this.joinRing.position.set(junction.x, junction.y + 3, junction.z);
       if (this.tool === 'select' || this.tool === 'bulldoze') this.showTooltip(Net.edgeNear(hit.x, hit.z));
     }
     this.brushRing.visible = !!hit && this.tool === 'cut';
@@ -337,7 +344,9 @@ const App = {
       }
     } else if (t === 'run') {
       const pts = h ? (this.holdAngle && d.pts.length ? this.heldPath(d.pts, h) : [...d.pts, h]) : d.pts;
-      if (!d.pts.length) hint = 'Drag from a lift top down the slope to draw a run, or click point by point. The map shows the steepness. <span class="dim">Right-drag to rotate.</span>';
+      if (!d.pts.length) hint = h && h.junction
+        ? `Start here to <b>branch off ${h.junction.run.name}</b>. Skiers can choose either way at the junction.`
+        : 'Drag from a lift top, or from the middle of a piste to branch off, down the slope. The map shows the steepness. <span class="dim">Right-drag to rotate.</span>';
       else if (pts.length >= 2) {
         const plan = Net.runPlan(pts, false, this.grade());
         if (plan.dense) {
@@ -353,7 +362,8 @@ const App = {
             this.gradingNeeds(plan) +
             (this.holdAngle && pts[pts.length - 2] && pts[pts.length - 2].fallAngle ? `<br><span class="dim">Holding ${this.gradeDeg}° by heading ${Math.round(pts[pts.length - 2].fallAngle)}° off the fall line</span>` : '') +
             (plan.ok ? '' : ` — <span class="neg">${plan.msg}</span>`) +
-            '<br><span class="dim">Keep dragging or clicking · end on a lift or lodge to finish, or press Enter · Backspace undo · Esc cancel</span>';
+            (h && h.junction ? `<br><b class="join">Release or click to join ${h.junction.run.name} here</b> (shortcut / merge)` : '') +
+            '<br><span class="dim">Keep dragging or clicking · end on a lift, a lodge or another piste to finish, or press Enter · Backspace undo · Esc cancel</span>';
         }
         $('#finish-run').hidden = d.pts.length < 2;
         if (plan.gradeDeg && plan.dense && plan.path && plan.len) this.queueEarthPreview(plan.dense);
@@ -391,7 +401,7 @@ const App = {
       if (this.holdAngle && d.pts.length) { d.pts = this.heldPath(d.pts, h); }
       else d.pts.push({ ...h });
       const end = d.pts[d.pts.length - 1];
-      if (d.pts.length >= 2 && end.node && end.node !== d.pts[0].node) return this.finishRun();
+      if (d.pts.length >= 2 && ((end.node && end.node !== d.pts[0].node) || end.junction)) return this.finishRun();
     }
     this.updateHover();
   },
@@ -462,7 +472,7 @@ const App = {
       if (!n || !Terrain.inside(n.x, n.z)) break;
       out.push(n); cur = n;
     }
-    if (!partial && h.node && Math.hypot(h.x - cur.x, h.z - cur.z) < 90) {
+    if (!partial && (h.node || h.junction) && Math.hypot(h.x - cur.x, h.z - cur.z) < 90) {
       if (Math.hypot(h.x - cur.x, h.z - cur.z) < 15) out.pop();
       out.push({ ...h });
     }
@@ -580,7 +590,7 @@ const App = {
     if (!last) { pts.push({ ...h }); return; }
     if (this.holdAngle) { this.draft.pts = this.heldPath(pts, h, true); return; }
     const gap = Math.hypot(last.x - h.x, last.z - h.z);
-    if (gap >= 30 || (h.node && h.node !== last.node && gap > 5)) pts.push({ ...h });
+    if (gap >= 30 || (h.node && h.node !== last.node && gap > 5)) { const p = { ...h }; if (pts.length) delete p.junction; pts.push(p); }
   },
 
   strokeEnd() {
@@ -593,7 +603,7 @@ const App = {
     const pts = this.draft.pts, last = pts[pts.length - 1];
     if (!this.holdAngle && h && last && Math.hypot(last.x - h.x, last.z - h.z) > 10) pts.push({ ...h });
     const end = pts[pts.length - 1];
-    if (pts.length >= 2 && end.node && end.node !== pts[0].node) this.finishRun();
+    if (pts.length >= 2 && ((end.node && end.node !== pts[0].node) || end.junction)) this.finishRun();
     else this.updateHover();
   },
 

@@ -241,6 +241,7 @@ const Net = {
   },
 
   buildLift(plan, free = false, opt = null, name = null) {
+    this.resolveJunction(plan.a); this.resolveJunction(plan.b);
     const A = this.pointNode(plan.a), B = this.pointNode(plan.b), T = plan.T;
     const l = { kind: 'lift', id: this.seq.lift++, type: plan.type, T, a: A, b: B, len: plan.len, vert: plan.vert,
                 cost: plan.build, queue: [], carriers: [], clock: 0, dist: 0, nextD: 0, next: T.dwell || 0,
@@ -384,17 +385,17 @@ const Net = {
       plan.path = new Path(plan.dense);
       plan.len = plan.path.length;
     }
-    const A = this.pointNode(plan.points[0]), B = this.pointNode(plan.points[plan.points.length - 1]);
-    const r = { kind: 'run', id: this.seq.run++, a: A, b: B, diff: plan.diff, path: plan.path, len: plan.len,
-                drop: plan.drop, maxG: plan.maxG, cost: plan.build, gradeDeg: plan.gradeDeg || null, cross: plan.cross || 0,
-                points: plan.points.map((p) => ({ x: p.x, z: p.z })) };
-    r.name = `Run ${r.id}`;
-    r.vis = makeRibbon(plan.dense, DIFF[r.diff].color);
-    r.dense = plan.dense;
-    this.group.add(r.vis);
-    const s = plan.dense[Math.min(6, plan.dense.length - 1)];
-    r.label = Labels.add(String(r.id), `run run-${r.diff}`, { x: s.x, y: s.y + 22, z: s.z });
-    A.runs.push(r); B.runs.push(r); this.runs.push(r);
+    // branching off / joining another piste: split it there and use the junction
+    const ends = [plan.points[0], plan.points[plan.points.length - 1]];
+    for (const p of ends) this.resolveJunction(p);
+    const A = this.pointNode(ends[0]), B = this.pointNode(ends[1]);
+    plan.dense[0] = { x: A.x, y: A.y, z: A.z };
+    plan.dense[plan.dense.length - 1] = { x: B.x, y: B.y, z: B.z };
+    const r = this.addRunEdge({
+      a: A, b: B, dense: plan.dense, diff: plan.diff, drop: plan.drop, maxG: plan.maxG, cost: plan.build,
+      gradeDeg: plan.gradeDeg || null, cross: plan.cross || 0, piste: plan.piste || null,
+      points: plan.points.map((p) => ({ x: p.x, z: p.z })),
+    });
     if (!free) Terrain.clearTrees(plan.dense, RUN_WIDTH * 0.65);
     this.version++;
     if (free) return r;
@@ -402,6 +403,60 @@ const Net = {
     const fed = A.base || A.lifts.some((l) => l.b === A) || A.runs.some((x) => x.b === A);
     if (!fed) UI.toast('Nothing brings skiers to the top of this run yet — end a lift there.');
     return r;
+  },
+
+  addRunEdge(o) {
+    const r = Object.assign({ kind: 'run', id: this.seq.run++ }, o);
+    r.piste = r.piste || r.id;                 // segments of one piste share its number
+    r.name = `Run ${r.piste}`;
+    r.path = new Path(r.dense); r.len = r.path.length;
+    r.vis = makeRibbon(r.dense, DIFF[r.diff].color);
+    this.group.add(r.vis);
+    const s = r.dense[Math.min(6, r.dense.length - 1)];
+    r.label = Labels.add(String(r.piste), `run run-${r.diff}`, { x: s.x, y: s.y + 22, z: s.z });
+    r.a.runs.push(r); r.b.runs.push(r); this.runs.push(r);
+    return r;
+  },
+
+  // Closest point on a piste's centreline, away from its ends (those snap to the end nodes instead).
+  nearestRunPoint(x, z, r = RUN_WIDTH * 0.8) {
+    let best = null, bd = r;
+    for (const run of this.runs) {
+      const d = run.dense, edge = 40;
+      for (let i = 1; i < d.length - 1; i++) {
+        const dd = Math.hypot(d[i].x - x, d[i].z - z);
+        if (dd < bd && run.path.cum[i] > edge && run.path.length - run.path.cum[i] > edge) { bd = dd; best = { run, i, x: d[i].x, z: d[i].z, y: d[i].y }; }
+      }
+    }
+    return best;
+  },
+
+  resolveJunction(p) {
+    if (p.node || !p.junction) return;
+    const j = this.nearestRunPoint(p.x, p.z, 10);   // look again: an earlier split may have renumbered things
+    if (j) { p.node = this.splitRun(j.run, j.i); p.x = p.node.x; p.z = p.node.z; }
+  },
+
+  // Cut a piste in two at dense index i; returns the junction node. Skiers on it carry on seamlessly.
+  splitRun(r, i) {
+    const d = r.dense, J = this.addNode(d[i].x, d[i].z);
+    const jp = { x: J.x, y: J.y, z: J.z };
+    const first = d.slice(0, i).concat([jp]), second = [jp].concat(d.slice(i + 1));
+    const cutAt = r.path.cum[i], frac = cutAt / r.path.length;
+    const sub = (pts) => pts.filter((_, k) => k % 3 === 0 || k === pts.length - 1).map((p) => ({ x: p.x, z: p.z }));
+    const base = { diff: r.diff, maxG: r.maxG, gradeDeg: r.gradeDeg, cross: r.cross, piste: r.piste };
+    // detach the old segment (no refund: it is being re-used)
+    this.runs.splice(this.runs.indexOf(r), 1);
+    for (const n of [r.a, r.b]) n.runs = n.runs.filter((x) => x !== r);
+    this.group.remove(r.vis); disposeGroup(r.vis); r.label.remove();
+    const r1 = this.addRunEdge(Object.assign({ a: r.a, b: J, dense: first, drop: r.a.y - J.y, cost: r.cost * frac, points: sub(first) }, base));
+    const r2 = this.addRunEdge(Object.assign({ a: J, b: r.b, dense: second, drop: J.y - r.b.y, cost: r.cost * (1 - frac), points: sub(second) }, base));
+    for (const s of Game.skiers) {
+      if (s.edge !== r) continue;
+      if (s.d < cutAt) s.edge = r1; else { s.edge = r2; s.d -= cutAt; }
+    }
+    this.version++;
+    return J;
   },
 
   remove(e) {
@@ -639,9 +694,17 @@ const Game = {
         const steep = clamp(-p.dy / Math.max(0.2, Math.hypot(p.dx, p.dz)), 0, 1);
         s.d += SKILL[s.skill].speed * s.pace * (0.75 + 0.7 * Math.min(1, steep / 0.4)) * dt;
         if (s.d >= r.path.length) {
-          s.done++;
+          const junction = !r.b.base && !r.b.lifts.length && r.b.runs.some((x) => x.a === r.b);
           const lean = Math.max(0, r.cross - 0.3) * (s.skill === 0 ? 30 : 15);   // tilted side-hill piste
-          s.happy = clamp(s.happy + SKILL[s.skill].pref[r.diff] + (s.last !== r ? 2 : -1) - lean, 0, 100);
+          // enjoyment scales with the vertical skied, so splitting a piste into segments changes nothing
+          const share = clamp(r.drop / 300, 0.25, 1.5);
+          s.happy = clamp(s.happy + (SKILL[s.skill].pref[r.diff] - lean) * share, 0, 100);
+          s.route = (s.route || '') + r.piste + ',';
+          if (!junction) {
+            s.done++;
+            if (s.route !== s.lastRoute) s.happy = clamp(s.happy + 2, 0, 100);   // likes variety
+            s.lastRoute = s.route; s.route = '';
+          }
           s.last = r; s.state = 'atNode'; s.node = r.b; s.edge = null;
         }
         break;
@@ -683,7 +746,7 @@ const Game = {
       nodes: Net.nodes.filter((n) => !n.base).map((n) => ({ id: n.id, x: n.x, z: n.z })),
       bases: Net.nodes.filter((n) => n.base).map((n) => ({ id: n.id, name: n.name })),
       lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id, opt: l.opt, name: l.name })),
-      runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points, gradeDeg: r.gradeDeg, diff: r.diff, maxG: r.maxG })),
+      runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points, gradeDeg: r.gradeDeg, diff: r.diff, maxG: r.maxG, piste: r.piste })),
       trees: Terrain.treeMask(),
       earthworks: this.earthworks,
     };
@@ -708,10 +771,12 @@ const Game = {
       if (plan.dense) {
         if (r.gradeDeg) plan.gradeDeg = r.gradeDeg;
         if (r.diff != null) { plan.diff = r.diff; plan.maxG = r.maxG; }
+        if (r.piste) plan.piste = r.piste;
         Net.buildRun(plan, true);
       }
     }
     Net.pruneNodes();
+    for (const r of Net.runs) Net.seq.run = Math.max(Net.seq.run, r.piste + 1, r.id + 1);
     if (d.trees) Terrain.applyTreeMask(d.trees);
     Object.assign(this, { money: d.money, day: d.day, time: d.time, rep: d.rep, debtDays: d.debtDays || 0 });
     if (d.stats) this.stats = Object.assign(this.stats, d.stats);

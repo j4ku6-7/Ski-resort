@@ -148,3 +148,4 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
 #grade-it { border: 0; border-radius: 8px; padding: 6px 12px; background: #ffcf5a; font-weight: 700; white-space: nowrap; }
 #earthworks { border: 0; background: #e8eef5; padding: 6px 10px; border-radius: 7px; }
 #earthworks.active { background: #b5452b; color: #fff; }
+.join { color: #35e0ff; }
