@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ski Resort</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="view"></div>
+<div id="labels"></div>
+
+<div id="menu">
+  <div class="menu-inner">
+    <h1>Ski Resort</h1>
+    <p class="sub">Build lifts and runs on real mountains. Terrain from real elevation data.</p>
+    <div id="resorts"></div>
+    <p class="foot">Elevation data: AWS Terrain Tiles (Mapzen / SRTM and others).</p>
+  </div>
+</div>
+
+<div id="hud" hidden>
+  <header id="topbar">
+    <span id="resort-name"></span>
+    <span class="stat"><i>Money</i><b id="money"></b></span>
+    <span class="stat"><i>Time</i><b id="clock"></b></span>
+    <span class="stat"><i>On slopes</i><b id="guests"></b></span>
+    <span class="stat"><i>Happiness</i><b id="happy"></b></span>
+    <span class="stat"><i>Reputation</i><b id="rep"></b></span>
+    <span class="stat wide"><i>Status</i><b id="status"></b></span>
+    <span class="speed">
+      <button data-speed="0" title="Pause (Space)">❚❚</button>
+      <button data-speed="1" class="active">1×</button>
+      <button data-speed="2">2×</button>
+      <button data-speed="4">4×</button>
+    </span>
+    <button id="to-menu" title="Back to resort selection">Menu</button>
+  </header>
+
+  <nav id="tools">
+    <button data-tool="select" title="1"><span>✥</span>View</button>
+    <button data-tool="chair" title="2 · €20 000 + €55/m · 4 seats, 2 057 skiers/h"><span>⛶</span>Chairlift</button>
+    <button data-tool="gondola" title="3 · €60 000 + €120/m · 8 seats, 2 880 skiers/h, fast"><span>▣</span>Gondola</button>
+    <button data-tool="run" title="4 · €25/m"><span>〰</span>Ski run</button>
+    <button data-tool="bulldoze" title="5 · 50% refund"><span>✕</span>Remove</button>
+    <div class="legend">
+      <div><i style="background:#2f7de1"></i>Blue ≤ 25%</div>
+      <div><i style="background:#e0393e"></i>Red ≤ 40%</div>
+      <div><i style="background:#18181c"></i>Black &gt; 40%</div>
+      <div class="sep"></div>
+      <div><i class="dot" style="background:#3fb0ff"></i>Beginner</div>
+      <div><i class="dot" style="background:#ff6a3d"></i>Intermediate</div>
+      <div><i class="dot" style="background:#9b4dff"></i>Expert</div>
+    </div>
+  </nav>
+
+  <div id="hintbar"><span id="hint"></span><button id="finish-run" hidden>Finish run ⏎</button></div>
+  <div id="tooltip" hidden></div>
+  <div id="toasts"></div>
+
+  <div id="summary" hidden>
+    <div class="panel">
+      <h2 id="summary-title"></h2>
+      <div id="summary-body"></div>
+      <button id="next-day">Start next day</button>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="vendor/OrbitControls.js"></script>
+<script src="data/jasna.js"></script>
+<script src="data/lomnica.js"></script>
+<script src="js/terrain.js"></script>
+<script src="js/labels.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
