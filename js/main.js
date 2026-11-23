@@ -158,6 +158,9 @@ const App = {
       camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
     });
     if (save) UI.toast(`Welcome back: day ${Game.day}, ${money(Game.money)}.`);
+    const un = save && Game.untangled;
+    if (un && un.moved) UI.toast(`Moved ${un.moved} overlapping station${un.moved > 1 ? 's' : ''} to free ground nearby, free of charge. Footpaths connect them to their old spots.` +
+      (un.reset.length ? ` ${un.reset.join(', ')} got automatic pylons again, because the hand-placed ones no longer passed inspection.` : ''));
     else UI.toast('Build a lift from a lodge (⌂) up the mountain, then draw a run back down to open the resort.');
     setInterval(() => Save.write(), 20000);
     addEventListener('beforeunload', () => Save.write());

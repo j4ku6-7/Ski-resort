@@ -283,8 +283,7 @@ const Net = {
 
   // If the station at point `pt` (towards `other`) would overlap a building, find the nearest free
   // spot around it (sideways first) and return it linked to the original node by a footpath.
-  freeStationSpot(T, pt, other, bottom) {
-    const fps = this.footprints();
+  freeStationSpot(T, pt, other, bottom, fps = this.footprints()) {
     const fpAt = (x, z) => {
       const dx = other.x - x, dz = other.z - z, d = Math.hypot(dx, dz) || 1;
       return Lifts.stationFootprint(T, { x, z }, dx / d, dz / d, bottom);
@@ -301,6 +300,54 @@ const Net = {
       }
     }
     return pt;
+  },
+
+  // Move stations that overlap a lodge or an earlier station (e.g. from saves made before stations
+  // were kept apart). Free of charge; the first-built station keeps its spot. Returns notes.
+  untangleStations() {
+    const accepted = this.nodes.filter((n) => n.base).map((n) => Lifts.lodgeFootprint(n));
+    const notes = { moved: 0, reset: [] };
+    const P = (n) => ({ x: n.x, z: n.z, node: n });
+    for (const l of [...this.lifts].sort((a, b) => a.id - b.id)) {
+      let changed = false;
+      const oldA = { x: l.a.x, z: l.a.z }, oldDir = { ...l.dir };
+      for (const end of ['a', 'b']) {
+        const node = l[end], bottom = end === 'a', other = bottom ? l.b : l.a;
+        const shared = bottom ? Lifts.partnerBelow(l) : Lifts.partnerAbove(l);     // stations on a line share one hall
+        const fp = Lifts.stationFootprint(l.T, node, l.dir.ux, l.dir.uz, bottom);
+        if (!shared && accepted.some((g) => Lifts.overlaps(fp, g))) {
+          const spot = this.freeStationSpot(l.T, P(node), other, bottom, accepted);
+          if (spot.moved) {
+            this.evacuate(l);
+            const N = this.addNode(spot.x, spot.z);
+            this.linkNodes(N, node);
+            node.lifts = node.lifts.filter((x) => x !== l);
+            l[end] = N; N.lifts.push(l);
+            changed = true; notes.moved++;
+          }
+        }
+        const dx = l.b.x - l.a.x, dz = l.b.z - l.a.z, d = Math.hypot(dx, dz) || 1;
+        accepted.push(Lifts.stationFootprint(l.T, l[end], dx / d, dz / d, bottom));
+      }
+      if (!changed) continue;
+      const plan = this.liftPlan(l.type, P(l.a), P(l.b), true, false, false);
+      l.len = plan.len; l.vert = plan.vert;
+      if (l.customTowers) {
+        // keep the player's pylons: re-project them onto the moved line
+        const hl = Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z), ux = (l.b.x - l.a.x) / hl, uz = (l.b.z - l.a.z) / hl;
+        l.customTowers = l.customTowers.map((t) => {
+          const wx = oldA.x + oldDir.ux * t.s, wz = oldA.z + oldDir.uz * t.s;
+          return { ...t, s: +((wx - l.a.x) * ux + (wz - l.a.z) * uz).toFixed(1) };
+        }).filter((t) => t.s > 15 && t.s < hl - 15);
+      }
+      this.rebuildLift(l);
+      if (l.customTowers && l.issues.length) { l.customTowers = null; this.rebuildLift(l); notes.reset.push(l.name); }
+      const up = Lifts.partnerAbove(l), down = Lifts.partnerBelow(l);
+      if (up) this.rebuildLift(up);
+      if (down) this.rebuildLift(down);
+    }
+    if (notes.moved) { this.pruneNodes(); this.version++; }
+    return notes;
   },
 
   // footpath between a moved station and the node it belongs to; skiers walk it freely
@@ -1050,6 +1097,7 @@ const Game = {
       }
     }
     for (const l of Net.lifts) if (l.line) Net.rebuildLift(l);   // stations need both sections to exist
+    this.untangled = Net.untangleStations();                       // older saves: pull overlapping stations apart
     Net.pruneNodes();
     for (const r of Net.runs) Net.seq.run = Math.max(Net.seq.run, r.piste + 1, r.id + 1);
     if (d.trees) Terrain.applyTreeMask(d.trees);
