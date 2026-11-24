@@ -91,6 +91,9 @@ h1 { font-size: 56px; margin: 0; letter-spacing: -1px; }
   padding: 8px 14px; border-radius: 10px; background: #c62f2f; color: #fff; font-weight: 600; font-size: 13px; text-align: center;
   box-shadow: 0 4px 16px rgba(0,0,0,.2); }
 .danger { margin: 12px 0 0; padding: 9px 11px; border-radius: 8px; background: #fde8e8; color: #9b1c1c; font-size: 13px; }
+#confirm { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(10,20,35,.45); z-index: 6; }
+#confirm p { margin: 0 0 6px; }
+.btns button.danger { background: #c62f2f; }
 #gameover { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(40,8,8,.6); z-index: 5; }
 #over-reason { margin: 0 0 12px; color: #9b1c1c; font-weight: 600; }
 .btns { display: flex; gap: 8px; margin-top: 16px; }

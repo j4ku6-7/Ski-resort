@@ -2,6 +2,29 @@
 const $ = (s) => document.querySelector(s);
 
 const UI = {
+  // ask before doing something that can't be undone: Enter or the red button confirms, Esc cancels
+  ask(title, body, ok, then) {
+    const box = $('#confirm');
+    $('#confirm-title').textContent = title;
+    $('#confirm-body').innerHTML = body;
+    $('#confirm-ok').textContent = ok;
+    box.hidden = false;
+    const done = (yes) => {
+      box.hidden = true; removeEventListener('keydown', key, true);
+      $('#confirm-ok').onclick = $('#confirm-cancel').onclick = box.onclick = null;
+      if (yes) then();
+    };
+    const key = (e) => {
+      if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); done(e.key === 'Enter'); }
+      else e.stopImmediatePropagation();                // no tool shortcuts behind the dialog
+    };
+    addEventListener('keydown', key, true);
+    $('#confirm-ok').onclick = () => done(true);
+    $('#confirm-cancel').onclick = () => done(false);
+    box.onclick = (e) => { if (e.target === box) done(false); };
+    $('#confirm-ok').focus();
+  },
+  get asking() { return !$('#confirm').hidden; },
   toast(msg) {
     const el = document.createElement('div');
     el.className = 'toast'; el.textContent = msg;
@@ -633,11 +656,27 @@ const App = {
     $('#hint').innerHTML = hint + (at ? ' ' + at : '');
   },
 
+  // the Remove tool and the Plans list ask first: one stray click shouldn't cost a cable car
+  askRemove(e) {
+    const lift = e.kind === 'lift', what = lift ? `${e.name} (${e.T.name}, ${fmt(e.len)} m)` : `${e.name} (${DIFF[e.diff].name.toLowerCase()} piste, ${fmt(e.len)} m)`;
+    const line = lift && Net.lineOf(e).length > 1 ? `<p>This is one section of a line with ${Net.lineOf(e).length} sections; the others stay.</p>` : '';
+    const body = e.planned ? `<p>The plan is deleted. Nothing was paid for it yet.</p>`
+      : `<p>${lift ? 'The lift, its stations and pylons are' : 'The piste is'} removed and you get back ${money(e.cost / 2)}, half of what it cost.</p>${line}<p class="danger">This can't be undone.</p>`;
+    UI.ask(e.planned ? `Delete the plan for ${what}?` : `Remove ${what}?`, body, e.planned ? 'Delete plan' : 'Remove', () => {
+      if (!(lift ? Net.lifts : Net.runs).includes(e)) return;           // already gone
+      if (e === this.panelLift) this.closeLiftPanel();
+      Net.remove(e); UI.toast(e.planned ? `Deleted the plan for ${e.name}` : `Removed ${e.name}. Refund ${money(e.cost / 2)}`);
+      Save.write(); this.refreshPlans(); this.updateHover();
+    });
+  },
+
   click() {
+    if (UI.asking) return;
     const h = this.hover, t = this.tool, d = this.draft;
     if (t === 'bulldoze' && h && Net.foodNear(h.x, h.z)) {
       const f = Net.foodNear(h.x, h.z), name = f.food.name, refund = FOOD_TYPES[f.food.type].cost * 0.5;
-      Net.removeFood(f); UI.toast(`Removed ${name}. Refund ${money(refund)}`); Save.write();
+      UI.ask(`Remove ${name}?`, `<p>The ${FOOD_TYPES[f.food.type].name.toLowerCase()} is demolished and you get back ${money(refund)}, half of what it cost.</p><p class="danger">This can't be undone.</p>`,
+        'Remove', () => { if (!Net.nodes.includes(f)) return; Net.removeFood(f); UI.toast(`Removed ${name}. Refund ${money(refund)}`); Save.write(); this.updateHover(); });
     } else if (t === 'flatten' && h) {
       this.applyFlatten({ y: Terrain.height(h.x, h.z), pts: [{ x: h.x, z: h.z }] });
     } else if (t === 'food') {
@@ -650,7 +689,7 @@ const App = {
       Save.write(); this.updateHover();
     } else if (t === 'bulldoze') {
       const e = h && Net.edgeNear(h.x, h.z);
-      if (e) { if (e === this.panelLift) this.closeLiftPanel(); Net.remove(e); UI.toast(e.planned ? `Deleted the plan for ${e.name}` : `Removed ${e.name}`); Save.write(); this.refreshPlans(); }
+      if (e) this.askRemove(e);
     } else if (t === 'move' && this.moving) {
       const { l, end } = this.moving, mp = this.moving.plan;
       if (!mp) return;
@@ -883,7 +922,7 @@ const App = {
         if (e.kind === 'lift') this.openLiftPanel(e);
       };
       row.querySelector('[data-a="build"]').onclick = () => this.buildPlan(e);
-      row.querySelector('[data-a="del"]').onclick = () => { if (this.panelLift === e) this.closeLiftPanel(); Net.remove(e); Save.write(); this.refreshPlans(); };
+      row.querySelector('[data-a="del"]').onclick = () => this.askRemove(e);
       $('#plans-list').appendChild(row);
     });
     $('#plans-total').innerHTML = `${money(total)}${total > Game.money ? ' <span class="neg">(more than you have)</span>' : ''}`;
