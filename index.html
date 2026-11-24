@@ -14,8 +14,25 @@
   <div class="menu-inner">
     <h1>Ski Resort</h1>
     <p class="sub">Build lifts and runs on real mountains. Terrain from real elevation data.</p>
-    <p class="rules">Keep your guests happy and your books in the black. You lose if you're in debt for 3 days in a row, owe more than €100 000, or your reputation falls below 15%. Progress saves automatically in this browser.</p>
+    <p class="rules">Keep your guests happy and your books in the black. You lose if you're in debt for 3 days in a row, owe more than €100 000, or your reputation falls below 15%. Progress saves automatically, and with the save server also under your player ID, so you can continue on another computer.</p>
     <div id="resorts"></div>
+    <div id="cloud" class="cloud">
+      <div class="cloud-head">
+        <span>☁ Your player ID</span>
+        <b id="cloud-id" class="cloud-id" title="Type this ID on another computer to continue there"></b>
+        <button id="cloud-copy" class="cloud-btn">Copy</button>
+      </div>
+      <div id="cloud-status" class="cloud-status"></div>
+      <form id="cloud-load-form" class="cloud-row">
+        <input id="cloud-other" placeholder="Player ID from another computer" maxlength="16" autocomplete="off" spellcheck="false">
+        <button class="cloud-btn">Load progress</button>
+      </form>
+      <form id="cloud-server-form" class="cloud-row" hidden>
+        <input id="cloud-server" placeholder="Save server, e.g. 192.168.1.20:8080" autocomplete="off" spellcheck="false">
+        <button class="cloud-btn">Connect</button>
+      </form>
+      <div id="cloud-result" class="panel" hidden></div>
+    </div>
     <div class="import">
       <button id="import-btn" class="import-btn">📂 Import save file</button>
       <input type="file" id="import-file" accept=".json,application/json" hidden>
@@ -46,6 +63,7 @@
     <button id="plans-btn" title="Planned lifts and runs">📐 Plans</button>
     <button id="earthworks" title="Show all terraforming: red = dug away, blue = filled">⛏ Earthworks</button>
     <button id="contours" title="Height lines every 50 m, bold every 250 m (H)">≋ Height lines</button>
+    <span id="save-state" class="save-state"></span>
     <button id="export-save" title="Download your progress as a file, to continue on another computer">💾 Save file</button>
     <button id="to-menu" title="Back to resort selection">Menu</button>
   </header>
@@ -55,6 +73,8 @@
     <button data-tool="lift" title="2 · 7 lift types"><span>⛶</span>Lift</button>
     <button data-tool="run" title="3 · €25/m"><span>〰</span>Ski run</button>
     <button data-tool="cut" title="4 · €150 per tree"><span>🪓</span>Cut trees</button>
+    <button data-tool="flatten" title="7 · level the ground, €0.50/m³"><span>⛰</span>Flatten</button>
+    <button data-tool="food" title="6 · huts and restaurants"><span>🍽</span>Restaurant</button>
     <button data-tool="bulldoze" title="5 · 50% refund"><span>✕</span>Remove</button>
     <button id="plan-mode" title="New lifts and runs become plans: free to place and change, built later from the Plans panel"><span>📐</span>Plan only</button>
     <div class="legend" id="slope-legend" hidden>
@@ -73,10 +93,12 @@
       <div><i class="dot" style="background:#3fb0ff"></i>Beginner</div>
       <div><i class="dot" style="background:#ff6a3d"></i>Intermediate</div>
       <div><i class="dot" style="background:#9b4dff"></i>Expert</div>
+      <div><i class="dot" style="background:#c8f03c"></i>Freerider</div>
     </div>
   </nav>
 
   <div id="lift-types" class="side-panel" hidden></div>
+  <div id="food-types" class="side-panel" hidden></div>
 
   <div id="run-options" class="side-panel" hidden>
     <b>Piste angle &amp; grading</b>
@@ -96,6 +118,7 @@
     <label class="slider">Line speed <input type="range" id="lp-speed" min="50" max="100" step="5"><span id="lp-speed-v"></span></label>
     <label class="slider" id="lp-density-row">Carriers on the line <input type="range" id="lp-density" min="40" max="100" step="10"><span id="lp-density-v"></span></label>
     <p class="dim small">Slower and fewer carriers cut running costs but lower capacity.</p>
+    <label class="slider" id="lp-style-row">Station style <select id="lp-style" aria-label="Station style"></select></label>
     <label class="slider" id="lp-pylon-row">Pylon style <select id="lp-pylon" aria-label="Pylon style"></select></label>
     <p id="lp-pylon-note" class="dim small"></p>
     <div id="lp-color-row"><span class="small">Colour</span><div id="lp-colors"></div></div>
@@ -103,7 +126,10 @@
     <div id="lp-plan" hidden><p class="plan-tag">📐 This lift is only a plan. Skiers can't use it until you build it.</p><button id="lp-build" class="primary-btn"></button></div>
     <label class="toggle" id="lp-open-row"><input type="checkbox" id="lp-open"> Open for skiers</label>
     <button id="lp-pylons" class="ghost-btn">⊥ Edit pylons</button>
+    <button id="lp-path-a" class="ghost-btn" hidden>🥾 Connect bottom station with a footpath</button>
+    <button id="lp-path-b" class="ghost-btn" hidden>🥾 Connect top station with a footpath</button>
     <div class="lp-move"><button id="lp-move-a" class="ghost-btn">⇄ Move bottom station</button><button id="lp-move-b" class="ghost-btn">⇄ Move top station</button></div>
+    <button id="lp-next" class="ghost-btn">⤴ Build the next section from the top station</button>
     <button id="lp-station" class="ghost-btn">＋ Add a station on this line</button>
     <button id="lp-unstation" class="ghost-btn" hidden></button>
     <div class="lp-up"><select id="lp-up" aria-label="Upgrade to"></select><button id="lp-up-go">Upgrade</button></div>

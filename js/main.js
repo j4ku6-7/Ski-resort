@@ -14,11 +14,15 @@ const UI = {
     $('#summary-body').innerHTML = `
       <div class="row"><span>Visitors</span><b>${fmt(st.visitors)}</b></div>
       <div class="row"><span>Ticket sales</span><b class="pos">${money(st.revenue)}</b></div>
+      <div class="row"><span>Food and drink (${fmt(st.meals || 0)} served)</span><b class="pos">${money(st.food || 0)}</b></div>
       <div class="row"><span>Refunds (nothing to ski)</span><b>${fmt(st.refunds || 0)}</b></div>
       <div class="row"><span>Operating costs</span><b class="neg">${money(-st.ops)}</b></div>
       <div class="row"><span>Construction</span><b class="neg">${money(-st.built)}</b></div>
       <div class="row"><span>Average happiness</span><b>${Math.round(avg)}%</b></div>
       <div class="row"><span>Unhappy guests</span><b>${fmt(st.angry)}</b></div>
+      <div class="row"><span>Rode a lift down</span><b>${fmt(st.downs || 0)}</b></div>
+      <div class="row"><span>Went hungry</span><b>${fmt(st.hungry || 0)}</b></div>
+      <div class="row"><span>Freeride descents</span><b>${fmt(st.freeride || 0)}</b></div>
       <div class="row"><span>Stranded at dead ends</span><b>${fmt(st.stranded)}</b></div>
       <div class="row"><span>Reputation</span><b>${Math.round(Game.rep)}%</b></div>
       <div class="row"><span>Balance</span><b class="${Game.money < 0 ? 'neg' : ''}">${money(Game.money)}</b></div>` +
@@ -47,35 +51,139 @@ const UI = {
 };
 
 const App = {
-  tool: 'select', draft: null, hover: null, preview: null, liftType: 'chair4', panelLift: null,
+  tool: 'select', draft: null, hover: null, preview: null, liftType: 'chair4', foodType: 'hut', panelLift: null,
   grading: false, holdAngle: false, gradeDeg: 13, manualPylons: false, edit: null, planMode: false, pylonFocus: true,
 
   init() {
     this.bindImport();
+    this.bindCloud();
+    this.renderResorts({});
+    this.syncCloud();
+  },
+
+  renderResorts(conflicts) {
     const menu = $('#resorts');
+    menu.innerHTML = '';
     for (const key of Object.keys(window.SKI_MAPS)) {
       const m = window.SKI_MAPS[key];
       const top = m.places.filter((p) => p.kind === 'peak').sort((a, b) => b.elev - a.elev)[0];
-      const save = Save.read(key), best = Save.best(key);
+      const save = Save.read(key), best = Save.best(key), other = conflicts[key];
       const b = document.createElement('div');
       b.className = 'card';
       b.innerHTML = `<span class="card-name">${m.name}</span><span class="card-region">${m.region}</span>
         <span class="card-meta">▲ ${top.name} ${top.elev} m · ${((m.w * m.cell) / 1000).toFixed(1)} × ${((m.h * m.cell) / 1000).toFixed(1)} km of real terrain` +
-        (best ? ` · best: ${best.days} days` : '') + `</span>
-        <span class="card-actions">` +
-        (save ? `<button class="primary" data-act="continue">Continue · Day ${save.day} · ${money(save.money)}</button>` : '') +
-        `<button class="${save ? '' : 'primary'}" data-act="new">New game</button></span>`;
+        (best ? ` · best: ${best.days} days` : '') + `</span>` +
+        (other ? `<span class="card-note">This resort was also played on another computer. Pick which progress to keep; the other is replaced.</span>` : '') +
+        `<span class="card-actions">` +
+        (save ? `<button class="primary" data-act="continue">Continue · Day ${save.day} · ${money(save.money)}${other ? ' (this computer)' : ''}</button>` : '') +
+        (other ? `<button class="primary" data-act="cloud">☁ Day ${other.save.day} · ${money(other.save.money)} (other computer)</button>` : '') +
+        `<button class="${save || other ? '' : 'primary'}" data-act="new">New game</button></span>`;
       b.querySelector('[data-act="new"]').onclick = () => {
-        if (save && !b.classList.contains('confirm')) {
+        if ((save || other) && !b.classList.contains('confirm')) {
           b.classList.add('confirm');
           b.querySelector('[data-act="new"]').textContent = 'Overwrite save? Click again';
           return;
         }
         Save.clear(key); this.start(key, null);
       };
-      if (save) b.querySelector('[data-act="continue"]').onclick = () => this.start(key, save);
+      if (save) b.querySelector('[data-act="continue"]').onclick = () => { if (other) Cloud.keepLocal(key); this.start(key, Save.read(key)); };
+      if (other) b.querySelector('[data-act="cloud"]').onclick = () => { Cloud.take(key, other); this.start(key, Save.read(key)); };
       menu.appendChild(b);
     }
+  },
+
+  async syncCloud() {
+    const r = await Cloud.sync();
+    if (!Cloud.playing) this.renderResorts(r.conflicts);
+  },
+
+  bindCloud() {
+    const id = Cloud.id();
+    $('#cloud-id').textContent = Cloud.pretty(id);
+    $('#cloud-copy').onclick = async () => {
+      const txt = Cloud.pretty(Cloud.id());
+      let ok = false;
+      try { await navigator.clipboard.writeText(txt); ok = true; } catch { /* needs a secure page */ }
+      if (!ok) { const r = document.createRange(); r.selectNodeContents($('#cloud-id')); getSelection().removeAllRanges(); getSelection().addRange(r); ok = document.execCommand && document.execCommand('copy'); }
+      $('#cloud-copy').textContent = ok ? 'Copied ✓' : 'Select & copy';
+      setTimeout(() => { $('#cloud-copy').textContent = 'Copy'; }, 1800);
+    };
+    const status = () => {
+      const el = $('#cloud-status'), at = Cloud.lastSync ? new Date(Cloud.lastSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      const srv = Cloud.server();
+      $('#cloud-server-form').hidden = !!srv && Cloud.state !== 'offline';
+      el.innerHTML = {
+        off: 'Saves stay in this browser. To continue on another computer with this ID, start the save server with <code>node server.js</code> and open the address it prints (or enter it below).',
+        checking: 'Checking the save server…',
+        saving: 'Saving to the server…',
+        ok: `Synced with the save server${at ? ' at ' + at : ''}. On another computer, open the same server and enter this ID.`,
+        offline: `Can't reach the save server${srv ? ' at ' + srv : ''}. Progress still saves in this browser and is uploaded once the server is back.`,
+        conflict: 'Some resorts were played on two computers. Pick which progress to keep on their cards.',
+      }[Cloud.state] || '';
+      if (srv) $('#cloud-server').placeholder = srv.replace(/^https?:\/\//, '');
+    };
+    Cloud.onState = () => { if (!$('#menu').hidden) status(); else this.saveState(); };
+    status();
+
+    const box = $('#cloud-result');
+    $('#cloud-load-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const other = Cloud.parseId($('#cloud-other').value);
+      box.hidden = false;
+      if (!other) { box.innerHTML = '<p class="danger">A player ID has 10 letters and digits, like <b>K7QM4-XPA2B</b>.</p>'; return; }
+      if (other === Cloud.id()) { box.innerHTML = '<p>That is already the ID of this computer.</p>'; return; }
+      if (!Cloud.server()) { box.innerHTML = '<p class="danger">Connect to the save server first (see above).</p>'; return; }
+      box.innerHTML = '<p>Looking up ' + Cloud.pretty(other) + '…</p>';
+      let doc;
+      try { doc = await Cloud.fetchPlayer(other); } catch { box.innerHTML = `<p class="danger">Can't reach the save server at ${Cloud.server()}.</p>`; return; }
+      const list = doc ? Object.entries(doc.resorts).filter(([k]) => window.SKI_MAPS[k]) : [];
+      if (!list.length) { box.innerHTML = `<p class="danger">No progress is saved under ${Cloud.pretty(other)} on this server. Check the ID, and that both computers use the same save server.</p>`; return; }
+      const here = Object.keys(window.SKI_MAPS).filter((k) => Save.read(k));
+      const replaced = here.filter((k) => doc.resorts[k]);
+      box.innerHTML = `<p><b>${Cloud.pretty(other)}</b> has:</p>` +
+        list.map(([k, c]) => `<div class="row"><span>${window.SKI_MAPS[k].name}</span><b>Day ${c.save.day} · ${money(c.save.money)}</b></div>`).join('') +
+        (replaced.length ? `<p class="danger">This replaces the progress on this computer for ${replaced.map((k) => `${window.SKI_MAPS[k].name} (day ${Save.read(k).day})`).join(', ')}.</p>` : '') +
+        (here.length > replaced.length ? `<p class="dim">Resorts only played here are kept and added to ${Cloud.pretty(other)}.</p>` : '') +
+        `<p class="dim">This computer then uses ${Cloud.pretty(other)}. Write down ${Cloud.pretty(Cloud.id())} first if you want to come back to it.</p>` +
+        `<div class="btns"><button id="cloud-ok">Use ${Cloud.pretty(other)} here</button><button id="cloud-cancel" class="ghost">Cancel</button></div>`;
+      $('#cloud-cancel').onclick = () => { box.hidden = true; };
+      $('#cloud-ok').onclick = () => {
+        Cloud.adopt(other, doc);
+        box.hidden = true; $('#cloud-other').value = '';
+        $('#cloud-id').textContent = Cloud.pretty(other);
+        Cloud.lastSync = Date.now(); Cloud.set('ok');
+        this.renderResorts({});
+      };
+    };
+    $('#cloud-server-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const url = Cloud.normalizeServer($('#cloud-server').value);
+      if (!url && $('#cloud-server').value.trim()) { box.hidden = false; box.innerHTML = '<p class="danger">That is not a server address. Use the one <code>node server.js</code> prints, like 192.168.1.20:8080.</p>'; return; }
+      Cloud.setServer(url);
+      box.hidden = true;
+      this.syncCloud();
+    };
+  },
+
+  // small "saved" note in the top bar
+  saveState() {
+    const el = $('#save-state');
+    if (!el) return;
+    const t = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const local = Save.lastWrite ? 'Saved ' + t(Save.lastWrite) : '';
+    const c = {
+      ok: ' · ☁ synced', saving: ' · ☁ saving…', checking: '', off: '',
+      offline: ' · ☁ offline', conflict: ' · ☁ not synced',
+    }[Cloud.state] || '';
+    el.textContent = local + c;
+    el.classList.toggle('warn', Cloud.state === 'conflict' || Cloud.state === 'offline');
+    el.title = {
+      ok: `Saved in this browser and on the save server under player ID ${Cloud.pretty(Cloud.id())}.`,
+      saving: 'Uploading to the save server…',
+      offline: "Saved in this browser. The save server can't be reached; it's uploaded once it's back.",
+      conflict: 'Another computer saved this resort meanwhile. It keeps saving in this browser; open the menu to choose which progress to keep.',
+      off: 'Saved in this browser. Start the save server (node server.js) to keep progress under your player ID.',
+    }[Cloud.state] || '';
   },
 
   bindImport() {
@@ -100,6 +208,7 @@ const App = {
 
   start(key, save) {
     const map = window.SKI_MAPS[key];
+    Cloud.playing = key;
     $('#menu').hidden = true; $('#hud').hidden = false;
     Terrain.load(map);
 
@@ -184,7 +293,11 @@ const App = {
       (un.reset.length ? ` ${un.reset.join(', ')} got automatic pylons again, because the hand-placed ones no longer passed inspection.` : ''));
     else UI.toast('Build a lift from a lodge (⌂) up the mountain, then draw a run back down to open the resort.');
     setInterval(() => Save.write(), 20000);
-    addEventListener('beforeunload', () => Save.write());
+    addEventListener('beforeunload', () => Save.write(true));
+    // the tab going to the background (or a phone locking) may be the last chance to upload
+    addEventListener('visibilitychange', () => { if (document.hidden) Save.write(true); });
+    Cloud.onConflict = () => UI.toast('This resort was saved from another computer meanwhile. Your progress keeps saving in this browser; open the Menu to choose which to keep.');
+    this.saveState();
     requestAnimationFrame(() => this.loop());
   },
 
@@ -200,6 +313,9 @@ const App = {
         this.edit.sel = this.edit.hover; this.stroke = { pylon: this.edit.hover }; this.controls.enabled = false; this.drawPylonOverlay();
       } else if (e.button === 0 && (this.tool === 'run' || this.tool === 'cut') && this.hover) {
         this.stroke = { cut: 0, last: null }; this.controls.enabled = false;
+      } else if (e.button === 0 && this.tool === 'flatten' && this.hover) {
+        const h = this.hover;
+        this.stroke = { flat: { y: Terrain.height(h.x, h.z), pts: [{ x: h.x, z: h.z }] } }; this.controls.enabled = false; this.flatPlan = null;
       }
     }, true);
     el.addEventListener('pointermove', (e) => {
@@ -240,10 +356,10 @@ const App = {
 
     for (const b of document.querySelectorAll('[data-tool]')) b.onclick = () => this.setTool(b.dataset.tool);
     for (const b of document.querySelectorAll('[data-speed]')) b.onclick = () => this.setSpeed(+b.dataset.speed);
-    $('#next-day').onclick = () => { $('#summary').hidden = true; Game.nextDay(); Save.write(); };
+    $('#next-day').onclick = () => { $('#summary').hidden = true; Game.nextDay(); Save.write(true); };
     $('#retry').onclick = () => { Save.clear(Game.map.key); location.search = '?new=' + Game.map.key; };
     $('#over-menu').onclick = () => location.replace(location.pathname);
-    $('#to-menu').onclick = () => { Save.write(); location.replace(location.pathname); };
+    $('#to-menu').onclick = async () => { Save.write(); await Cloud.flush(Game.map.key); location.replace(location.pathname); };
     $('#export-save').onclick = () => {
       Save.write();
       const name = Save.exportFile();
@@ -271,7 +387,7 @@ const App = {
         if (e.key === '[' || e.key === ']') { this.stepPylon(e.key === ']' ? 1 : -1); e.preventDefault(); return; }
         if (e.key === 'Enter') { this.finishPylons(); return; }
       }
-      const keys = { '1': 'select', '2': 'lift', '3': 'run', '4': 'cut', '5': 'bulldoze' };
+      const keys = { '1': 'select', '2': 'lift', '3': 'run', '4': 'cut', '5': 'bulldoze', '6': 'food', '7': 'flatten' };
       if (keys[e.key]) this.setTool(keys[e.key]);
       else if (e.key === '[' || e.key === ']') {
         this.brush = clamp(this.brush + (e.key === ']' ? 10 : -10), 20, 120);
@@ -291,6 +407,9 @@ const App = {
     this.tool = t;
     this.draft = t === 'lift' ? { a: null } : t === 'run' ? { pts: [] } : null;
     $('#lift-types').hidden = t !== 'lift';
+    $('#food-types').hidden = t !== 'food';
+    if (t === 'food') this.buildFoodPicker();
+    this.clearFoodVis();
     $('#run-options').hidden = t !== 'run';
     $('#pylon-panel').hidden = t !== 'pylons';
     $('#profile-dock').hidden = t !== 'pylons';
@@ -352,7 +471,11 @@ const App = {
       if (node) { this.snapRing.visible = true; this.snapRing.position.set(node.x, node.y + 3, node.z); }
       this.joinRing.visible = !!junction;
       if (junction) this.joinRing.position.set(junction.x, junction.y + 3, junction.z);
-      if (this.tool === 'select' || this.tool === 'bulldoze') this.showTooltip(Net.edgeNear(hit.x, hit.z));
+      if (this.tool === 'select' || this.tool === 'bulldoze') {
+        const f = Net.foodNear(hit.x, hit.z);
+        if (f) this.showFoodTooltip(f); else this.showTooltip(Net.edgeNear(hit.x, hit.z));
+      }
+      if (this.tool === 'food') this.hoverFood(hit);
     }
     if (this.tool === 'pylons' && this.edit) this.hoverPylons(hit);
     if (this.tool === 'move' && this.moving) this.hoverMove(hit);
@@ -369,7 +492,7 @@ const App = {
         }
       }
     } else if (this.snapRing) this.snapRing.material.color.set(0x3dff9a);
-    this.brushRing.visible = !!hit && this.tool === 'cut';
+    this.brushRing.visible = !!hit && (this.tool === 'cut' || this.tool === 'flatten');
     if (this.brushRing.visible) this.brushRing.position.set(hit.x, hit.y + 4, hit.z);
     this.updatePreview();
   },
@@ -407,7 +530,26 @@ const App = {
     $('#finish-run').hidden = true;
     $('#grade-it').hidden = true;
     if (t === 'select') hint = 'Drag to rotate · right-drag to pan · scroll to zoom toward the cursor · WASD/arrows move · Q/E turn · double-click to fly there · click a lift for its options.';
-    else if (t === 'bulldoze') hint = 'Click a lift or run to remove it (50% refund).';
+    else if (t === 'bulldoze') hint = 'Click a lift, run or restaurant to remove it (50% refund).';
+    else if (t === 'flatten') {
+      const fs = this.stroke && this.stroke.flat, fp = this.flatPlan;
+      hint = fs && fp ? (fp.ok ? `Levelling to <b>${fmt(Terrain.elev(fs.y))} m</b> · cut ${fmt(fp.ew.cut)} m³ · fill ${fmt(fp.ew.fill)} m³${fp.trees ? ` · ${fp.trees} trees` : ''} · <b>${money(fp.cost)}</b> · release to build` : `<span class="neg">${fp.msg}</span>`)
+        : `<b>Flatten</b>: drag to level the ground to the height where you start, or click to level one spot${h ? ` (here ${fmt(Terrain.elev(Terrain.height(h.x, h.z)))} m)` : ''}. ` +
+          `Brush ${this.brush} m, <span class="dim">[ ] to resize</span> · earthworks ${money(EARTH_COST)}/m³, trees ${money(TREE_COST)} · ${at}`;
+    }
+    else if (t === 'food') {
+      const fp = this.foodPlanNow, T = FOOD_TYPES[this.foodType];
+      hint = !fp ? `<b>${T.name}</b>: point near a lift station, a piste or a lodge. Pick another type on the right.` :
+        !fp.ok ? `<span class="neg">${fp.msg}</span>` :
+        `<b>${T.name}</b> · ${T.seats} seats · ${fmt(fp.walk)} m footpath to ${fp.attach.node ? (fp.attach.node.base ? fp.attach.node.name : fp.attach.node.lifts.length ? 'the lift station' : 'the piste') : fp.attach.junction.run.name} · ` +
+        `<b>${money(fp.cost)}</b>${fp.trees ? ` <span class="dim">(incl. ${fp.trees} trees)</span>` : ''} · ${money(T.op)}/day to run — click to build`;
+    }
+    else if (t === 'move' && this.moving && this.moving.path) {
+      const mp = this.moving.plan, l = this.moving.l, which = this.moving.end === 'a' ? 'bottom' : 'top';
+      hint = !mp ? `Point at a lodge, a lift station or a piste to join ${l.name}'s ${which} station to · Esc to cancel` :
+        !mp.ok ? `<span class="neg">${mp.msg}</span>` :
+        `Click to lay a <b>${Math.round(mp.d)} m footpath</b> here (free)${mp.t.junction ? `, joining ${mp.t.junction.run.name} at a junction` : ''} · Esc to cancel`;
+    }
     else if (t === 'move' && this.moving) {
       const mp = this.moving.plan, l = this.moving.l, which = this.moving.end === 'a' ? 'bottom' : 'top';
       hint = !mp ? `Point where ${l.name}'s ${which} station should go · Esc to cancel` :
@@ -435,6 +577,7 @@ const App = {
     else if (t === 'lift') {
       const T = LIFT_TYPES[this.liftType];
       if (!d.a) hint = `<b>${T.name}</b>: click the bottom station, snapping to a lodge or run end. Pick another type on the right.`;
+      else if (!h && d.from) hint = `Next section from ${d.from.name}'s top station: point where the new section should end · Esc to cancel`;
       else if (h) {
         const plan = Net.liftPlan(this.liftType, d.a, h, this.planMode, this.manualPylons);
         const pa = plan.a, pb = plan.b;
@@ -446,6 +589,8 @@ const App = {
         this.liftLine.visible = true;
         const cap = (T.seats / (T.kind === 'tram' ? 2 * (plan.len / T.speed + T.dwell) : T.interval)) * 3600;
         hint = (plan.joinWith ? `<b class="join">Continues ${plan.joinWith.name} through an ${plan.bendDeg > 3 ? `angle station (turns ${Math.round(plan.bendDeg)}°)` : 'intermediate station'}</b> · ` : '') +
+          (d.from && !plan.joinWith ? `<b class="join">Transfer station: skiers change from ${d.from.name} to this ${T.name.toLowerCase()} beside its top station</b>` +
+            (Lifts.canHaveStations(d.from.T) && this.liftType !== d.from.type ? ` <span class="dim">(pick ${d.from.T.name} to share one station and let them ride through)</span>` : '') + ' · ' : '') +
           (plan.a.moved || plan.b.moved ? '<span class="dim">Station moved next to the existing building, joined by a footpath</span> · ' : '') +
           (plan.crossed && plan.crossed.length ? `<span class="warn">⚠ crosses ${plan.crossed.map((x) => x.name).join(', ')}</span> · ` : '') +
           `${fmt(plan.len)} m · climbs ${fmt(plan.vert)} m · ${plan.towers} towers · ${fmt(cap)} skiers/h · ride ${(plan.len / T.speed / 60).toFixed(1)} min · <b>${money(plan.cost)}</b>` +
@@ -486,13 +631,33 @@ const App = {
 
   click() {
     const h = this.hover, t = this.tool, d = this.draft;
-    if (t === 'bulldoze') {
+    if (t === 'bulldoze' && h && Net.foodNear(h.x, h.z)) {
+      const f = Net.foodNear(h.x, h.z), name = f.food.name, refund = FOOD_TYPES[f.food.type].cost * 0.5;
+      Net.removeFood(f); UI.toast(`Removed ${name}. Refund ${money(refund)}`); Save.write();
+    } else if (t === 'flatten' && h) {
+      this.applyFlatten({ y: Terrain.height(h.x, h.z), pts: [{ x: h.x, z: h.z }] });
+    } else if (t === 'food') {
+      const fp = this.foodPlanNow;
+      if (!fp) return;
+      if (!fp.ok) return UI.toast(fp.msg);
+      const n = Net.buildFood(fp);
+      if (!n) return UI.toast('That piste changed, point at it again');
+      UI.toast(`Built ${n.food.name}, a ${fp.T.name.toLowerCase()} with ${fp.T.seats} seats, for ${money(fp.cost)}. Guests will come here for coffee and lunch.`);
+      Save.write(); this.updateHover();
+    } else if (t === 'bulldoze') {
       const e = h && Net.edgeNear(h.x, h.z);
       if (e) { if (e === this.panelLift) this.closeLiftPanel(); Net.remove(e); UI.toast(e.planned ? `Deleted the plan for ${e.name}` : `Removed ${e.name}`); Save.write(); this.refreshPlans(); }
     } else if (t === 'move' && this.moving) {
       const { l, end } = this.moving, mp = this.moving.plan;
       if (!mp) return;
       if (!mp.ok) return UI.toast(mp.msg);
+      if (this.moving.path) {
+        const r = Net.addFootpath(l, end, mp.t);
+        if (!r.ok) return UI.toast(r.msg);
+        UI.toast(`${l.name}: ${end === 'a' ? 'bottom' : 'top'} station joined by a ${Math.round(r.d)} m footpath. Skiers can walk it both ways.`);
+        this.endMove(); Save.write(); this.setTool('select'); this.openLiftPanel(l);
+        return;
+      }
       const r = Net.moveStation(l, end, mp.x, mp.z);
       if (!r.ok) return UI.toast(r.msg);
       UI.toast(`${l.name}: ${end === 'a' ? 'bottom' : 'top'} station moved${r.cost ? ` for ${money(r.cost)}` : ''}` +
@@ -504,7 +669,7 @@ const App = {
       if (this.stationS == null) return;
       const l = this.stationLift, r = Net.addMidStation(l, this.stationS);
       if (!r.ok) return UI.toast(r.msg);
-      UI.toast(`Built a station on ${l.name}${r.cost ? ` for ${money(r.cost)}` : ''}. Skiers can get on and off there, or stay on.`);
+      UI.toast(`Built a station on ${l.name}${r.cost ? ` for ${money(r.cost)}` : ''}. ` + (l.T.kind === 'tram' ? 'It now runs as two tramways, each with its own pair of cabins. Skiers can get off there or change cabins and carry on.' : 'Skiers can get on and off there, or stay on.'));
       this.stationLift = null; Save.write(); this.setTool('select'); this.openLiftPanel(l);
       return;
     } else if (t === 'pylons' && this.edit) {
@@ -561,6 +726,30 @@ const App = {
     $('#grade-it').hidden = false;
     $('#grade-it').textContent = `Terraform to ≤ ${this.gradeDeg}°`;
     return `<br><span class="warn">⚠ Terraforming needed: this run ${out.join(' and ')}.</span>`;
+  },
+
+  // live cut/fill overlay and price while dragging the Flatten brush
+  queueFlatPreview() {
+    clearTimeout(this.flatTimer);
+    this.flatTimer = setTimeout(() => {
+      const st = this.stroke && this.stroke.flat;
+      if (!st) return;
+      this.flatPlan = Net.flattenPlan(Net.flattenOp(st.pts, st.y, this.brush));
+      this.clearEarthPreview(false);
+      const ew = this.flatPlan.ew;
+      this.earthMesh = Terrain.earthOverlay(new Map(ew.ks.map((k, n) => [k, ew.dhs[n]])));
+      this.scene.add(this.earthMesh);
+      this.updatePreview();
+    }, 60);
+  },
+  applyFlatten(st) {
+    clearTimeout(this.flatTimer);
+    const plan = Net.flattenPlan(Net.flattenOp(st.pts, st.y, this.brush));
+    this.flatPlan = null; this.clearEarthPreview();
+    if (!plan.ok) { UI.toast(plan.msg); this.updateHover(); return; }
+    Net.flatten(plan);
+    UI.toast(`Levelled the ground to ${fmt(Terrain.elev(st.y))} m: ${fmt(plan.volume)} m³ of earthworks${plan.trees ? ` and ${plan.trees} trees` : ''} for ${money(plan.cost)}`);
+    Save.write(); this.updateHover();
   },
 
   queueEarthPreview(dense) {
@@ -698,10 +887,76 @@ const App = {
     $('#plans-build-all').textContent = plans.length ? `Build all · ${money(total)}` : 'Build all';
   },
 
-  // ---------- moving a station ----------
-  startMove(l, end) {
+  // ---------- restaurants ----------
+  buildFoodPicker() {
+    const box = $('#food-types');
+    box.innerHTML = `<b class="pk-title">Places to eat</b>
+      <p class="dim small">Guests want a coffee mid-morning, lunch around midday and a coffee in the afternoon. When it's time, they head for the quickest place to eat, by piste, lift and footpath. The lodges at the base have ${LODGE_SEATS} seats.</p>`;
+    for (const [key, T] of Object.entries(FOOD_TYPES)) {
+      const b = document.createElement('button');
+      b.className = 'pick' + (key === this.foodType ? ' active' : '');
+      b.innerHTML = `<span class="pk-ico">${T.icon}</span><span class="pk-name">${T.name}</span>
+        <span class="pk-meta">${T.seats} seats · ${money(T.cost)} · ${money(T.op)}/day</span><span class="pk-desc">${T.desc}</span>`;
+      b.onclick = () => { this.foodType = key; this.buildFoodPicker(); this.updateHover(); };
+      box.appendChild(b);
+    }
+    const list = Net.nodes.filter((n) => n.food);
+    if (list.length) box.insertAdjacentHTML('beforeend', '<b class="pk-title">Your restaurants</b>' + list.map((n) =>
+      `<div class="row small"><span>${FOOD_TYPES[n.food.type].icon} ${n.food.name}</span><b>${n.eating || 0}/${FOOD_TYPES[n.food.type].seats} · ${money(n.food.today || 0)} today</b></div>`).join(''));
+  },
+  clearFoodVis() {
+    if (this.foodVis) { this.scene.remove(this.foodVis); this.foodVis.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); this.foodVis = null; }
+    this.foodPlanNow = null;
+  },
+  hoverFood(hit) {
+    this.clearFoodVis();
+    if (!hit) return;
+    const fp = this.foodPlanNow = Net.foodPlan(this.foodType, hit.x, hit.z);
+    const col = fp.ok ? 0x3dff9a : 0xff4d4d, y = (x, z) => Terrain.height(x, z) + 3, g = new THREE.Group();
+    if (fp.fp) {
+      const f = fp.fp, c = [];
+      for (const [a, b] of [[1, 1], [1, -1], [-1, -1], [-1, 1], [1, 1]]) {
+        const x = f.cx + f.ux * f.hl * a - f.uz * f.hw * b, z = f.cz + f.uz * f.hl * a + f.ux * f.hw * b;
+        c.push(new THREE.Vector3(x, y(x, z), z));
+      }
+      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(c), new THREE.LineBasicMaterial({ color: col, depthTest: false })));
+    }
+    if (fp.attach) {
+      const t = fp.attach, line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(fp.x, y(fp.x, fp.z), fp.z), new THREE.Vector3(t.x, y(t.x, t.z), t.z)]),
+        new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 4, gapSize: 3, depthTest: false }));
+      line.computeLineDistances(); g.add(line);
+    }
+    g.traverse((o) => { o.renderOrder = 12; });
+    this.foodVis = g; this.scene.add(g);
+  },
+  showFoodTooltip(n) {
+    const tt = $('#tooltip'), T = FOOD_TYPES[n.food.type];
+    if (!this.mouse) return;
+    tt.innerHTML = `<b>${T.icon} ${n.food.name} · ${T.name}</b><br>${n.eating || 0} of ${T.seats} seats taken<br>` +
+      `Sales today ${money(n.food.today || 0)}${n.food.yesterday != null ? ` <span class="dim">(yesterday ${money(n.food.yesterday)})</span>` : ''} · costs ${money(T.op)}/day` +
+      (this.tool === 'bulldoze' ? `<br><span class="neg">Click to remove · refund ${money(T.cost / 2)}</span>` : '');
+    tt.style.left = this.mouse.x + 16 + 'px'; tt.style.top = this.mouse.y + 16 + 'px';
+    tt.hidden = false;
+  },
+
+  // ---------- next section of a line ----------
+  // Lift tool with the start fixed on this lift's top station. The same type (detachable chairs and
+  // gondolas) continues the line through a shared angle station; any other type gets its own
+  // station beside it, joined by a footpath, where skiers change lifts.
+  startNextSection(l) {
     this.closeLiftPanel();
-    this.moving = { l, end, plan: null };
+    if (l.type !== this.liftType) { this.liftType = l.type; this.buildLiftPicker(); }
+    this.setTool('lift');
+    this.draft.a = { x: l.b.x, z: l.b.z, y: l.b.y, node: l.b };
+    this.draft.from = l;
+    this.flyTo({ x: l.b.x, y: l.b.y, z: l.b.z }, 900);
+    this.updateHover();
+  },
+
+  // ---------- moving a station ----------
+  startMove(l, end, path = false) {
+    this.closeLiftPanel();
+    this.moving = { l, end, plan: null, path };
     this.setTool('move');
     const n = l[end];
     this.flyTo({ x: n.x, y: n.y, z: n.z }, 420);
@@ -713,6 +968,7 @@ const App = {
   hoverMove(hit) {
     const m = this.moving;
     if (this.moveVis) { this.scene.remove(this.moveVis); this.moveVis.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); this.moveVis = null; }
+    if (m.path) return this.hoverFootpath(hit);
     m.plan = hit ? Net.moveStationPlan(m.l, m.end, hit.x, hit.z) : null;
     if (!m.plan) return;
     const mp = m.plan, col = !mp.ok ? 0xff4d4d : mp.crossings.length ? 0xffa31a : 0x3dff9a;
@@ -731,6 +987,32 @@ const App = {
       }
       g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(c), new THREE.LineBasicMaterial({ color: col, depthTest: false })));
     }
+    g.traverse((o) => { o.renderOrder = 12; });
+    this.moveVis = g; this.scene.add(g);
+  },
+
+  // footpath mode: snap to a lodge / station (not this one) or a point on a piste
+  hoverFootpath(hit) {
+    const m = this.moving, n = m.l[m.end];
+    let t = null;
+    if (hit) {
+      let bd = SNAP;
+      for (const o of Net.nodes) {
+        const d = Math.hypot(o.x - hit.x, o.z - hit.z);
+        if (o !== n && d < bd) { bd = d; t = { x: o.x, z: o.z, y: o.y, node: o }; }
+      }
+      const j = !t && Net.nearestRunPoint(hit.x, hit.z);
+      if (j) t = { x: j.x, z: j.z, y: j.y, junction: j };
+    }
+    m.plan = hit ? Net.footpathPlan(m.l, m.end, t) : null;
+    if (!t) return;
+    const col = m.plan.ok ? 0x3dff9a : 0xff4d4d, y = (x, z) => Terrain.height(x, z) + 3;
+    const pts = [], k = Math.max(2, Math.ceil(Math.hypot(t.x - n.x, t.z - n.z) / 6));
+    for (let i = 0; i <= k; i++) { const x = n.x + ((t.x - n.x) * i) / k, z = n.z + ((t.z - n.z) * i) / k; pts.push(new THREE.Vector3(x, y(x, z), z)); }
+    const g = new THREE.Group(), line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: col, dashSize: 5, gapSize: 3, depthTest: false }));
+    line.computeLineDistances(); g.add(line);
+    const ring = t.node ? this.snapRing : this.joinRing;   // updateHover hides it again every frame
+    ring.position.set(t.x, t.y + 3, t.z); ring.visible = true;
     g.traverse((o) => { o.renderOrder = 12; });
     this.moveVis = g; this.scene.add(g);
   },
@@ -1198,6 +1480,12 @@ const App = {
     $('#lp-density').value = Math.round(l.opt.density * 100);
     $('#lp-density-row').hidden = T.kind === 'tram' || T.kind === 'belt';
     $('#lp-open').checked = l.opt.open;
+    const st = $('#lp-style'), styled = T.kind === 'aerial' && T.station3d !== 'fixed';
+    $('#lp-style-row').hidden = !styled;
+    if (styled) {
+      st.innerHTML = Object.entries(Lifts.STATION_STYLES).map(([k, n]) => `<option value="${k}">${n}</option>`).join('');
+      st.value = Lifts.stationStyle(l);
+    }
     const ps = $('#lp-pylon');
     ps.innerHTML = (T.pylons || []).filter((k) => !PYLONS[k].perPylon).map((k) => `<option value="${k}">${PYLONS[k].name}</option>`).join('');
     ps.value = Lifts.pylonType(l);
@@ -1223,6 +1511,7 @@ const App = {
     const line = Net.lineOf(l), sec = line.indexOf(l) + 1;
     $('#lp-type').textContent = `${T.icon} ${T.name}${l.planned ? ' · 📐 planned' : ''}${line.length > 1 ? ` · section ${sec} of ${line.length}` : ''}`;
     $('#lp-station').hidden = !Lifts.canHaveStations(T);
+    $('#lp-next').hidden = !!Lifts.partnerAbove(l);
     $('#lp-unstation').hidden = !Lifts.partnerAbove(l);
     if (Lifts.partnerAbove(l)) {
       const up = Lifts.partnerAbove(l), bend = Lifts.bendAngle(l, up);
@@ -1236,7 +1525,8 @@ const App = {
       <div class="row"><span>Capacity</span><b>${fmt(Lifts.capacity(l))} skiers/h</b></div>
       <div class="row"><span>Ride time</span><b>${(Lifts.rideTime(l) / 60).toFixed(1)} min</b></div>
       <div class="row"><span>Queue</span><b>${l.queue.length}${l.queue.length ? ` · ~${Math.round(Lifts.waitTime(l) / 60)} min` : ''}</b></div>
-      <div class="row"><span>Rides today</span><b>${fmt(l.ridesToday)}${l.ridesYesterday != null ? ` <small>(yesterday ${fmt(l.ridesYesterday)})</small>` : ''}</b></div>
+      <div class="row"><span>Rides today</span><b>${fmt(l.ridesToday)}${l.ridesYesterday != null ? ` <small>(yesterday ${fmt(l.ridesYesterday)})</small>` : ''}</b></div>` +
+      (T.enclosed ? `<div class="row"><span>Riding down</span><b>${fmt(l.downsToday || 0)} today${(l.downQueue || []).length ? ` · ${l.downQueue.length} waiting at the top` : ''}</b></div>` : '') + `
       <div class="row"><span>Running cost</span><b class="neg">${money(-Lifts.dailyCost(l))}/day${l.planned ? ' <small>(once built)</small>' : ''}</b></div>`;
     const plan = Net.upgradePlan(l, $('#lp-up').value);
     $('#lp-up-go').textContent = plan.ok ? (l.planned ? 'Change type' : `Upgrade · ${money(plan.cost)}`) : 'Upgrade';
@@ -1245,7 +1535,10 @@ const App = {
     $('#lp-remove').textContent = `Remove lift (refund ${money(l.cost / 2)})`;
     const sp = Net.pylonStylePlan(l, $('#lp-pylon').value);
     $('#lp-pylon-note').textContent = `${PYLONS[Lifts.pylonType(l)].desc} Max height ${Lifts.maxPylonH(T, Lifts.pylonType(l))} m.`;
-    $('#lp-inspect').innerHTML = l.issues && l.issues.length ? `<p class="danger">⚠ ${l.planned ? 'Would fail' : 'Failed'} safety inspection: ${l.issues.join('; ')}</p>` : '';
+    $('#lp-inspect').innerHTML = (l.issues && l.issues.length ? `<p class="danger">⚠ ${l.planned ? 'Would fail' : 'Failed'} safety inspection: ${l.issues.join('; ')}</p>` : '') +
+      ['a', 'b'].filter((e) => Net.isolatedEnd(l, e)).map((e) => `<p class="danger">⚠ The ${e === 'a' ? 'bottom' : 'top'} station isn't connected to any run, lodge or footpath, so skiers can't ${e === 'a' ? 'get to it' : 'leave it'}.</p>`).join('');
+    $('#lp-path-a').hidden = !Net.isolatedEnd(l, 'a');
+    $('#lp-path-b').hidden = !Net.isolatedEnd(l, 'b');
     $('#lp-plan').hidden = !l.planned;
     $('#lp-open-row').hidden = !!l.planned;
     if (l.planned) $('#lp-build').textContent = `Build it · ${money(Net.planCost(l).total)}`;
@@ -1267,6 +1560,11 @@ const App = {
       Save.write(); this.refreshLiftPanel();
     };
     $('#lp-up').onchange = () => this.refreshLiftPanel();
+    $('#lp-style').onchange = (e) => {
+      const l = L();
+      for (const x of Net.lineOf(l)) { x.opt.station = e.target.value; Net.rebuildLift(x); }   // one look for the whole line
+      Save.write();
+    };
     $('#lp-pylon').onchange = (e) => {
       const l = L(), r = Net.setPylonStyle(l, e.target.value);
       if (!r.ok) { UI.toast(r.msg); e.target.value = Lifts.pylonType(l); return; }
@@ -1282,6 +1580,9 @@ const App = {
     $('#lp-build').onclick = () => this.buildPlan(L());
     $('#lp-move-a').onclick = () => this.startMove(L(), 'a');
     $('#lp-move-b').onclick = () => this.startMove(L(), 'b');
+    $('#lp-next').onclick = () => this.startNextSection(L());
+    $('#lp-path-a').onclick = () => this.startMove(L(), 'a', true);
+    $('#lp-path-b').onclick = () => this.startMove(L(), 'b', true);
     $('#lp-station').onclick = () => { const l = L(); this.closeLiftPanel(); this.stationLift = l; this.setTool('station'); };
     $('#lp-unstation').onclick = () => {
       const l = L(), r = Net.removeStation(l.b);
@@ -1306,6 +1607,13 @@ const App = {
       return;
     }
     if (!h) return;
+    if (st.flat) {
+      const pts = st.flat.pts, last = pts[pts.length - 1];
+      if (Math.hypot(last.x - h.x, last.z - h.z) < this.brush * 0.3) return;
+      pts.push({ x: h.x, z: h.z });
+      this.queueFlatPreview();
+      return;
+    }
     if (this.tool === 'cut') {
       if (st.last && Math.hypot(st.last.x - h.x, st.last.z - h.z) < this.brush * 0.4) return;
       st.last = { x: h.x, z: h.z };
@@ -1321,6 +1629,7 @@ const App = {
 
   strokeEnd() {
     if (this.stroke.pylon != null) return;
+    if (this.stroke.flat) return this.applyFlatten(this.stroke.flat);
     if (this.tool === 'cut') {
       if (this.stroke.cut) { UI.toast(`Felled ${this.stroke.cut} trees for ${money(this.stroke.cut * TREE_COST)}`); Save.write(); }
       return;

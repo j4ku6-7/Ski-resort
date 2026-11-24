@@ -16,11 +16,31 @@ const DIFF = [
   { name: 'Red', color: 0xe0393e, css: '#e0393e' },
   { name: 'Black', color: 0x18181c, css: '#18181c' },
 ];
+// crowd: how much a queue puts them off a lift (better skiers know the mountain and go where it's quiet)
 const SKILL = [
-  { name: 'Beginners', maxDiff: 0, speed: 7, color: 0x3fb0ff, pref: [6, 0, 0] },
-  { name: 'Intermediates', maxDiff: 1, speed: 10, color: 0xff6a3d, pref: [3, 7, 0] },
-  { name: 'Experts', maxDiff: 2, speed: 13, color: 0x9b4dff, pref: [1, 5, 9] },
+  { name: 'Beginners', maxDiff: 0, speed: 7, color: 0x3fb0ff, pref: [6, 0, 0], crowd: 0 },
+  { name: 'Intermediates', maxDiff: 1, speed: 10, color: 0xff6a3d, pref: [3, 7, 0], crowd: 0.8 },
+  { name: 'Experts', maxDiff: 2, speed: 13, color: 0x9b4dff, pref: [1, 5, 9], crowd: 2 },
+  { name: 'Freeriders', maxDiff: 2, speed: 14, color: 0xc8f03c, pref: [0, 2, 6], crowd: 3, offPiste: 10 },
 ];
+const FREERIDER = 3;
+
+// Places to eat. Lodges at the base always have a restaurant; huts and restaurants are built on the mountain.
+const FOOD_TYPES = {
+  hut: { name: 'Mountain hut', icon: '🛖', seats: 90, cost: 180000, op: 900, w: 22, d: 16,
+         desc: 'A wooden hut with a sunny terrace. Coffee, soup and apple strudel.' },
+  restaurant: { name: 'Panorama restaurant', icon: '🍽', seats: 260, cost: 520000, op: 2400, w: 40, d: 26,
+                desc: 'A big self-service restaurant with glass walls and a huge terrace.' },
+};
+const LODGE_SEATS = 300, FOOD_REACH = 160;
+const FOOD_NAMES = ['Edelweiss', 'Gipfelstube', 'Enzian', 'Murmeltier', 'Sonnenalm', 'Bergkristall', 'Adlerhorst', 'Schneerose', 'Gamsstube', 'Almrausch'];
+// what guests eat and when (seconds since midnight), how long they stay, what they spend
+const MEALS = {
+  morning: { name: 'a morning coffee', spend: 5, mins: [10, 20], happy: 5, chance: 0.45, from: 9.75, to: 10.75 },
+  lunch: { name: 'lunch', spend: 21, mins: [30, 50], happy: 12, chance: 0.92, from: 11.5, to: 13.25 },
+  afternoon: { name: 'an afternoon coffee', spend: 6, mins: [15, 25], happy: 6, chance: 0.4, from: 14.25, to: 15.5 },
+};
+const FREE_MAX_G = 1.0;                // freeride lines take pitches up to 45°, never cliffs
 const fmt = (n) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 const money = (n) => (n < 0 ? '−€' : '€') + fmt(Math.abs(n));
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
@@ -115,6 +135,40 @@ function traverseStep(from, toward, maxG, prev = null, step = 25) {
   return { x: from.x + dx * step, z: from.z + dz * step, dx, dz, fallAngle: (th * 180) / Math.PI };
 }
 
+// An off-piste line from one node down to a lower one, found on the real terrain: always downhill,
+// never steeper than FREE_MAX_G, keeping enough height to still reach the target, and seeking out the
+// steeper ground freeriders like. Returns null when the mountain doesn't allow it.
+function traceFreeride(from, to) {
+  const step = 18, ty = Terrain.height(to.x, to.z);
+  let x = from.x, z = from.z, y = Terrain.height(x, z), hx = 0, hz = 0, maxG = 0;
+  const y0 = y, pts = [{ x, z }];
+  for (let k = 0; k < 400; k++) {
+    const dx = to.x - x, dz = to.z - z, d = Math.hypot(dx, dz);
+    if (d < 40) {
+      if (y < ty) return null;
+      pts.push({ x: to.x, z: to.z });
+      const dense = smoothLine(pts, 8).map((p) => ({ x: p.x, z: p.z, y: Terrain.height(p.x, p.z) }));
+      return { from, to, path: new Path(dense), drop: y0 - ty, maxG };
+    }
+    const bx = dx / d, bz = dz / d;
+    let best = null, bs = -Infinity;
+    for (let a = -80; a <= 80; a += 10) {
+      const r = (a * Math.PI) / 180, ux = bx * Math.cos(r) - bz * Math.sin(r), uz = bx * Math.sin(r) + bz * Math.cos(r);
+      const nx = x + ux * step, nz = z + uz * step;
+      if (!Terrain.inside(nx, nz)) continue;
+      const ny = Terrain.height(nx, nz), g = (y - ny) / step;
+      if (g < 0.03 || g > FREE_MAX_G) continue;                              // keep moving downhill, no cliffs
+      if (ny - ty < 0.04 * Math.hypot(to.x - nx, to.z - nz)) continue;      // don't run out of height
+      const s = ux * bx + uz * bz + 0.8 * Math.min(g, 0.7) + (k ? 0.5 * (ux * hx + uz * hz) : 0);
+      if (s > bs) { bs = s; best = { nx, nz, ny, ux, uz, g }; }
+    }
+    if (!best) return null;
+    x = best.nx; z = best.nz; y = best.ny; hx = best.ux; hz = best.uz; maxG = Math.max(maxG, best.g);
+    pts.push({ x, z });
+  }
+  return null;
+}
+
 const degToGrade = (d) => Math.tan((d * Math.PI) / 180);
 const gradeToDeg = (g) => (Math.atan(g) * 180) / Math.PI;
 
@@ -167,7 +221,7 @@ function makeRibbon(pts, color, opacity = 0.62, width = RUN_WIDTH, colors = null
 }
 
 function disposeGroup(obj) {
-  const shared = new Set([...Object.values(GEO), MAT.tower, MAT.cable, MAT.node, MAT.lodge, MAT.roof]);
+  const shared = new Set([...Object.values(GEO), MAT.tower, MAT.cable, MAT.node, MAT.lodge, MAT.roof, ...Object.values(makeFoodVisual.M || {})]);
   obj.traverse((o) => {
     if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
     if (o.material && !shared.has(o.material)) o.material.dispose();
@@ -181,9 +235,47 @@ function makeNodeVisual(n) {
     const body = new THREE.Mesh(GEO.box, MAT.lodge); body.scale.set(46, 18, 30); body.position.y = 9;
     const roof = new THREE.Mesh(GEO.roof, MAT.roof); roof.scale.set(36, 16, 26); roof.position.y = 18;
     g.add(body, roof);
+  } else if (n.food) {
+    g.add(makeFoodVisual(n));
   } else {
     g.add(new THREE.Mesh(GEO.disc, MAT.node));
   }
+  return g;
+}
+
+// Hut: log walls on a stone plinth, steep roof, terrace on the downhill side with parasols.
+// Restaurant: glass ground floor, timber upper floor, flat roof, a long terrace.
+function makeFoodVisual(n) {
+  const T = FOOD_TYPES[n.food.type], g = new THREE.Group(), M = makeFoodVisual.M || (makeFoodVisual.M = {
+    stone: new THREE.MeshLambertMaterial({ color: 0x8d8a85 }), log: new THREE.MeshLambertMaterial({ color: 0x7a4b26 }),
+    deck: new THREE.MeshLambertMaterial({ color: 0xa8754a }), roof: new THREE.MeshLambertMaterial({ color: 0x5a3a28 }),
+    glass: new THREE.MeshLambertMaterial({ color: 0x9fc7ff, transparent: true, opacity: 0.6 }), flat: new THREE.MeshLambertMaterial({ color: 0x3d434b }),
+    red: new THREE.MeshLambertMaterial({ color: 0xc0392b }), white: new THREE.MeshLambertMaterial({ color: 0xf2efe8 }),
+  });
+  const add = (mat, w, h, d, x, y, z, geo = GEO.box) => { const m = new THREE.Mesh(geo, mat); m.scale.set(w, h, d); m.position.set(x, y, z); g.add(m); return m; };
+  const W = T.w, D = T.d, drop = n.food.drop || 0;        // drop: how far the ground falls away under the building
+  add(M.stone, W + 1, 3 + drop, D + 1, 0, (3 - drop) / 2 - 0.5, -2);
+  if (n.food.type === 'hut') {
+    add(M.log, W, 8, D, 0, 5, -2);
+    for (const x of [-W / 4, W / 4]) add(M.glass, 3, 3, 0.4, x, 5, D / 2 - 1.9);
+    add(M.roof, W * 0.82, 9, D * 0.82, 0, 9, -2, GEO.roof).rotation.y = 0;
+    add(M.stone, 2.2, 6, 2.2, W / 3, 14, -4);                 // chimney
+  } else {
+    add(M.glass, W, 6, D, 0, 4.5, -2);
+    add(M.log, W + 1, 6, D + 1, 0, 10.5, -2);
+    for (let x = -W / 2 + 4; x < W / 2; x += 6) add(M.glass, 3.4, 3, 0.4, x, 10.5, D / 2 - 1.4);
+    add(M.flat, W + 3, 1, D + 3, 0, 14, -2);
+  }
+  // terrace in front (+z), on stilts where the ground drops
+  const tw = W + 4, td = n.food.type === 'hut' ? 12 : 16;
+  add(M.deck, tw, 0.6, td, 0, 1.2, D / 2 - 2 + td / 2);
+  add(M.stone, tw, 1 + drop, 0.8, 0, (1 - drop) / 2, D / 2 - 2 + td);
+  for (let k = 0; k < (n.food.type === 'hut' ? 3 : 5); k++) {
+    const x = -tw / 2 + (tw * (k + 0.5)) / (n.food.type === 'hut' ? 3 : 5), z = D / 2 - 2 + td / 2;
+    add(M.white, 0.3, 4.5, 0.3, x, 3.7, z);
+    add(k % 2 ? M.white : M.red, 6, 1.4, 6, x, 6.2, z, GEO.roof);
+  }
+  g.rotation.y = n.food.rot || 0;
   return g;
 }
 
@@ -205,6 +297,7 @@ const Net = {
     const n = Object.assign({ id: this.seq.node++, x, z, y: Terrain.height(x, z), base: false, name: null, lifts: [], runs: [], links: [] }, opts);
     n.vis = makeNodeVisual(n); this.group.add(n.vis);
     if (n.base) n.label = Labels.add(`<span class="ico">⌂</span>${n.name}`, 'base', { x: n.x, y: n.y + 40, z: n.z });
+    if (n.food) n.label = Labels.add(`<span class="ico">${FOOD_TYPES[n.food.type].icon}</span>${n.food.name}`, 'base', { x: n.x, y: n.y + 30, z: n.z });
     this.nodes.push(n);
     return n;
   },
@@ -212,7 +305,10 @@ const Net = {
   pointNode(p) {
     if (p.node) return p.node;
     const n = this.addNode(p.x, p.z);
-    if (p.linkTo) this.linkNodes(n, p.linkTo);
+    if (p.home) {                                    // a station moved off its spot: footpath back to it
+      this.resolveJunction(p.home);                  // the spot may be a point on a piste, split it there
+      if (p.home.node) this.linkNodes(n, p.home.node);
+    }
     p.node = n;
     return n;
   },
@@ -220,7 +316,7 @@ const Net = {
 
   pruneNodes() {
     this.nodes = this.nodes.filter((n) => {
-      if (n.base || n.lifts.length || n.runs.length) return true;
+      if (n.base || n.food || n.lifts.length || n.runs.length) return true;
       this.unlinkNode(n);
       this.group.remove(n.vis); return false;
     });
@@ -275,10 +371,11 @@ const Net = {
   footprints(except = null) {
     const out = [];
     for (const n of this.nodes) if (n.base) out.push(Lifts.lodgeFootprint(n));
+    for (const n of this.nodes) if (n.food) out.push(this.foodFootprint(n));
     for (const l of this.lifts) {
       if (l === except) continue;
-      out.push(Lifts.stationFootprint(l.T, l.a, l.dir.ux, l.dir.uz, true));
-      out.push(Lifts.stationFootprint(l.T, l.b, l.dir.ux, l.dir.uz, false));
+      out.push(Lifts.partnerBelow(l) ? Lifts.junctionFootprint(l.T, l.a, l.dir.ux, l.dir.uz, false) : Lifts.stationFootprint(l.T, l.a, l.dir.ux, l.dir.uz, true));
+      out.push(Lifts.partnerAbove(l) ? Lifts.junctionFootprint(l.T, l.b, l.dir.ux, l.dir.uz, true) : Lifts.stationFootprint(l.T, l.b, l.dir.ux, l.dir.uz, false));
     }
     return out;
   },
@@ -316,7 +413,7 @@ const Net = {
           const x = pt.x + dx * dist, z = pt.z + dz * dist;
           if (!Terrain.inside(x, z) || clashes(x, z)) continue;
           if (avoidCrossing && this.crossings({ x, z }, other, except).length) continue;
-          return { x, z, linkTo: pt.node || null, moved: true };
+          return { x, z, home: pt.node || pt.junction ? pt : null, moved: true };
         }
       }
     }
@@ -424,6 +521,124 @@ const Net = {
     return mp;
   },
 
+  // ---------- flattening (the Flatten tool) ----------
+  // A brush stroke along pts, levelling the ground to height y: flat within `half`, blending back
+  // to the natural slope over `margin`. Stored with the other earthworks, so it is saved and replayed.
+  flattenOp(pts, y, r) {
+    const P = pts.length === 1 ? [pts[0], pts[0]] : pts;
+    return { pts: P.map((p) => ({ x: +p.x.toFixed(1), z: +p.z.toFixed(1), y: +y.toFixed(2) })), half: +(r * 0.65).toFixed(1), margin: +(r * 0.55).toFixed(1) };
+  },
+  flattenPlan(op) {
+    const ew = Terrain.computeEarthwork(op), trees = Terrain.treesNear(op.pts, op.half).length;
+    const volume = ew.cut + ew.fill, cost = volume * EARTH_COST + trees * TREE_COST;
+    const out = { op, ew, trees, volume, cost, ok: false };
+    if (volume < 1) return { ...out, msg: 'The ground here is already level' };
+    if (cost > Game.money) return { ...out, msg: `Not enough money (${money(cost)})` };
+    return { ...out, ok: true, msg: null };
+  },
+  flatten(plan) {
+    Terrain.clearTrees(plan.op.pts, plan.op.half);
+    Terrain.applyEarthwork(plan.op);
+    Game.earthworks.push(plan.op);
+    Game.spend(plan.cost);
+    this.refreshHeights();                          // stations, runs and lifts follow the new ground
+    this.version++;
+  },
+
+  // ---------- restaurants ----------
+  foodFootprint(n, type = n.food.type, rot = n.food.rot || 0) {
+    const T = FOOD_TYPES[type], ux = Math.sin(rot), uz = Math.cos(rot), td = type === 'hut' ? 12 : 16;
+    const back = T.d / 2 + 2, ahead = T.d / 2 - 2 + td, mid = (ahead - back) / 2;   // building behind, terrace ahead
+    return { cx: n.x + ux * mid, cz: n.z + uz * mid, ux, uz, hl: (ahead + back) / 2, hw: T.w / 2 + 2 };
+  },
+  // Where a restaurant of this type would go at (x, z): it joins the nearest station, lodge or piste
+  // within FOOD_REACH by a footpath, and faces its terrace down the fall line.
+  foodPlan(type, x, z) {
+    const T = FOOD_TYPES[type], out = { ok: false, type, T, x, z, cost: T.cost };
+    if (!Terrain.inside(x, z)) return { ...out, msg: 'Outside the map' };
+    let attach = null, bd = FOOD_REACH;
+    for (const n of this.nodes) {
+      if (n.food) continue;
+      const d = Math.hypot(n.x - x, n.z - z);
+      if (d < bd) { bd = d; attach = { x: n.x, z: n.z, y: n.y, node: n }; }
+    }
+    const j = this.nearestRunPoint(x, z, Math.min(bd, FOOD_REACH));
+    if (j && Math.hypot(j.x - x, j.z - z) < bd - 20) { bd = Math.hypot(j.x - x, j.z - z); attach = { x: j.x, z: j.z, y: j.y, junction: j }; }
+    if (!attach) return { ...out, msg: `Build it within ${FOOD_REACH} m of a lift station, a piste or a lodge, so guests can get there` };
+    if (Terrain.slope(x, z) > 0.7) return { ...out, attach, msg: 'Too steep to build here' };
+    const e = 10, gx = Terrain.height(x + e, z) - Terrain.height(x - e, z), gz = Terrain.height(x, z + e) - Terrain.height(x, z - e);
+    const rot = Math.hypot(gx, gz) > 0.5 ? Math.atan2(-gx, -gz) : Math.atan2(attach.x - x, attach.z - z);   // terrace downhill
+    const fp = this.foodFootprint({ x, z }, type, rot);
+    if (this.footprints().some((f) => Lifts.overlaps(fp, f))) return { ...out, attach, rot, fp, msg: 'It would overlap another building' };
+    const trees = Terrain.treesNear([{ x, z }], T.w / 2 + 8).length, cost = T.cost + trees * TREE_COST;
+    let drop = 0;
+    for (const [px, pz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const cx = fp.cx + fp.ux * fp.hl * px - fp.uz * fp.hw * pz, cz = fp.cz + fp.uz * fp.hl * px + fp.ux * fp.hw * pz;
+      drop = Math.max(drop, Terrain.height(x, z) - Terrain.height(cx, cz));
+    }
+    const res = { ...out, attach, rot, fp, trees, cost, walk: bd, drop: Math.min(drop + 1, 30) };
+    if (cost > Game.money) return { ...res, msg: 'Not enough money' };
+    return { ...res, ok: true, msg: null };
+  },
+  buildFood(plan) {
+    const p = { ...plan.attach };
+    this.resolveJunction(p);
+    if (!p.node) return null;
+    const used = new Set(this.nodes.filter((n) => n.food).map((n) => n.food.name));
+    const name = FOOD_NAMES.find((x) => !used.has(x)) || `${plan.T.name} ${this.nodes.filter((n) => n.food).length + 1}`;
+    const n = this.addNode(plan.x, plan.z, { food: { type: plan.type, name, rot: plan.rot, drop: plan.drop } });
+    this.linkNodes(n, p.node);
+    Terrain.clearTrees([{ x: plan.x, z: plan.z }], plan.T.w / 2 + 8);
+    Game.spend(plan.cost);
+    this.version++;
+    return n;
+  },
+  foodNear(x, z, r = 30) {
+    let best = null, bd = r;
+    for (const n of this.nodes) if (n.food) { const d = Math.hypot(n.x - x, n.z - z); if (d < bd) { bd = d; best = n; } }
+    return best;
+  },
+  removeFood(n) {
+    const exit = n.links.find((m) => !m.food) || n.links[0] || null;
+    for (const s of Game.skiers) if (s.node === n && (s.state === 'eat' || s.state === 'atNode')) {
+      Game.leaveTable(s); s.state = 'atNode'; s.node = exit || s.node;
+    }
+    Game.money += FOOD_TYPES[n.food.type].cost * 0.5;
+    if (n.label) n.label.remove();
+    delete n.food; n.label = null;
+    this.group.remove(n.vis); disposeGroup(n.vis);
+    if (n.runs.length || n.lifts.length) { n.vis = makeNodeVisual(n); this.group.add(n.vis); }
+    else { this.nodes = this.nodes.filter((x) => x !== n); this.unlinkNode(n); }
+    this.version++;
+  },
+
+  // A lift end that nothing leads to or from: no lodge, run, footpath or other lift section.
+  isolatedEnd(l, end) {
+    const n = l[end];
+    return !n.base && !n.runs.length && !n.links.length && n.lifts.every((x) => x === l);
+  },
+
+  // Player joins a station to a lodge, another station or a point on a piste with a footpath (free).
+  footpathPlan(l, end, t) {
+    const n = l[end];
+    if (!t || !(t.node || t.junction)) return { ok: false, msg: 'Point at a lodge, a lift station or a piste' };
+    if (t.node === n) return { ok: false, msg: 'That is this station itself' };
+    if (t.node && n.links.includes(t.node)) return { ok: false, msg: 'Already joined by a footpath' };
+    const d = Math.hypot(t.x - n.x, t.z - n.z);
+    if (d > 220) return { ok: false, msg: `Too far (${Math.round(d)} m, max 220 m of footpath)` };
+    return { ok: true, msg: null, n, t, d };
+  },
+  addFootpath(l, end, t) {
+    const fp = this.footpathPlan(l, end, t);
+    if (!fp.ok) return fp;
+    const p = { ...t };
+    this.resolveJunction(p);
+    if (!p.node) return { ok: false, msg: 'That piste changed, point at it again' };
+    this.linkNodes(fp.n, p.node);
+    this.version++;
+    return fp;
+  },
+
   // footpath between a moved station and the node it belongs to; skiers walk it freely
   linkNodes(a, b) {
     if (!a || !b || a === b || a.links.includes(b)) return;
@@ -442,7 +657,14 @@ const Net = {
       this.group.remove(p.vis); disposeGroup(p.vis); return false;
     });
   },
-  hubOf(n) { return n.links && n.links.length ? [n, ...n.links] : [n]; },
+  // Every node a skier can walk to from n: the whole network of footpaths, not just the next hop
+  // (a station moved beside another moved station hangs two paths away from the lodge).
+  hubOf(n) {
+    if (!n.links || !n.links.length) return [n];
+    const out = [n];
+    for (let i = 0; i < out.length; i++) for (const m of out[i].links) if (!out.includes(m)) out.push(m);
+    return out;
+  },
 
   buildLift(plan, free = false, opt = null, name = null) {
     this.resolveJunction(plan.a); this.resolveJunction(plan.b);
@@ -568,8 +790,8 @@ const Net = {
   },
 
   evacuate(l) {
-    for (const s of Game.skiers) if (s.edge === l) { s.state = 'atNode'; s.edge = null; s.node = l.a; }
-    l.queue.length = 0; l.carriers.length = 0;
+    for (const s of Game.skiers) if (s.edge === l) { const top = s.down && s.state === 'queue'; s.state = 'atNode'; s.edge = null; s.node = top ? l.b : l.a; s.down = false; }
+    l.queue.length = 0; l.carriers.length = 0; l.downQueue = []; l.downCarriers = [];
   },
 
   // swap the lift machinery, keeping the stations; half the old lift's value is credited
@@ -601,8 +823,8 @@ const Net = {
     if (open && l.issues && l.issues.length) return false;        // failed safety inspection
     if (l.opt.open === open) return true;
     l.opt.open = open;
-    if (!open) for (const s of l.queue) { s.state = 'atNode'; s.edge = null; }
-    if (!open) l.queue.length = 0;
+    if (!open) for (const s of [...l.queue, ...(l.downQueue || [])]) { s.state = 'atNode'; s.edge = null; s.down = false; }
+    if (!open) { l.queue.length = 0; l.downQueue = []; }
     this.version++;
     return true;
   },
@@ -854,7 +1076,7 @@ const Net = {
       s.state = 'atNode'; s.edge = null;
       s.node = e.kind === 'lift' ? e.a : e.b;
     }
-    if (e.kind === 'lift') { e.queue.length = 0; e.carriers.length = 0; }
+    if (e.kind === 'lift') { e.queue.length = 0; e.carriers.length = 0; e.downQueue = []; e.downCarriers = []; }
     for (const x of partners) { if (!this.lineOf(x).some((y) => y !== x)) x.line = null; this.rebuildLift(x); }
     this.pruneNodes();
     this.version++;
@@ -897,7 +1119,7 @@ const Game = {
   },
 
   newDayStats() {
-    this.stats = { visitors: 0, revenue: 0, built: 0, left: 0, happySum: 0, angry: 0, stranded: 0, refunds: 0 };
+    this.stats = { visitors: 0, revenue: 0, built: 0, left: 0, happySum: 0, angry: 0, stranded: 0, refunds: 0, freeride: 0, food: 0, meals: 0, hungry: 0, downs: 0 };
     this.warned = {};
   },
 
@@ -950,15 +1172,31 @@ const Game = {
   stepLift(l, dt) {
     if (l.planned) return;
     const T = l.T, open = l.opt.open, v = Lifts.speed(l), L = l.upPath.length;
-    if (!open && !l.carriers.length) return;          // stopped
+    if (!l.downQueue) { l.downQueue = []; l.downCarriers = []; }
+    if (!open && !l.carriers.length && !l.downCarriers.length) return;          // stopped
     l.clock += dt;
+    // each carrier passing the top station takes riders down (gondolas, funitels, 3S and trams)
+    const loadDown = (offset = 0) => {
+      if (!open || !l.downQueue.length) return;
+      const riders = l.downQueue.splice(0, T.seats);
+      for (const s of riders) s.state = 'lift';
+      l.downCarriers.push({ d: offset, riders }); l.downsToday = (l.downsToday || 0) + riders.length; this.stats.downs += riders.length;
+    };
     const load = () => {
+      loadDown();
       if (!open || !l.queue.length) return null;
       const riders = l.queue.splice(0, T.seats);
       for (const s of riders) s.state = 'lift';
       const c = { d: 0, riders }; l.carriers.push(c); l.ridesToday += riders.length;
       return c;
     };
+    for (const c of l.downCarriers) c.d += v * dt;
+    while (l.downCarriers.length && l.downCarriers[0].d >= l.downPath.length) {
+      for (const s of l.downCarriers.shift().riders) {
+        if (s.state !== 'lift') continue;
+        s.state = 'atNode'; s.node = l.a; s.edge = null; s.down = false; s.cameBy = null;
+      }
+    }
     if (T.kind === 'tram') {
       // jig-back: the cabin leaves the valley once per round trip
       while (l.clock >= l.next) { l.next += Lifts.interval(l); load(); }
@@ -982,7 +1220,7 @@ const Game = {
   },
 
   spawn() {
-    const u = Math.random(), skill = u < 0.35 ? 0 : u < 0.8 ? 1 : 2;
+    const u = Math.random(), skill = u < 0.33 ? 0 : u < 0.74 ? 1 : u < 0.92 ? 2 : FREERIDER;
     const bases = Net.nodes.filter((n) => n.base);
     const good = bases.filter((b) => this.canStart(b, skill));
     const pool = good.length ? good : bases;
@@ -990,8 +1228,98 @@ const Game = {
     this.skiers.push({
       skill, node, happy: 60 + Math.random() * 10, want: 4 + ((Math.random() * 7) | 0), done: 0,
       state: 'atNode', edge: null, d: 0, wait: 0, pace: 0.85 + Math.random() * 0.3, wig: Math.random() * 6.28, last: null,
+      meals: this.mealPlan(), need: null,
     });
     this.money += TICKET; this.stats.visitors++; this.stats.revenue += TICKET;
+  },
+
+  // ---------- food ----------
+  // Each guest's day: maybe a coffee mid-morning, lunch, maybe a coffee in the afternoon. A meal
+  // whose window has passed by the time they arrive is skipped (they ate before coming up).
+  mealPlan() {
+    const out = [];
+    for (const kind in MEALS) {
+      const m = MEALS[kind];
+      if (Math.random() > m.chance) continue;
+      const at = (m.from + Math.random() * (m.to - m.from)) * 3600;
+      if (at < this.time + 20 * 60) { if (kind === 'lunch' && this.time < m.to * 3600) out.push({ kind, at: this.time + 25 * 60 }); continue; }
+      out.push({ kind, at });
+    }
+    return out.sort((a, b) => a.at - b.at);
+  },
+  seats(n) { return n.base ? LODGE_SEATS : n.food ? FOOD_TYPES[n.food.type].seats : 0; },
+  hasFood(n) { return !!(n.base || n.food); },
+
+  // Travel time from every node to the nearest place to eat, for one skill level: skiing (only
+  // runs they can ski), lifts (queue + ride) and footpaths. Refreshed every few game minutes, since
+  // queues change. Reverse Dijkstra from all the restaurants and lodges.
+  canRideDown(l) { return !!(l.T.enclosed && l.opt.open && !l.planned); },
+  downWait(l) { return Math.ceil(((l.downQueue || []).length + 1) / l.T.seats) * Lifts.interval(l); },
+  // ways a guest can ride down from these hub nodes: enclosed lifts whose top station is here
+  downRides(hubs) {
+    const out = [];
+    for (const h of hubs) for (const l of h.lifts) if (l.b === h && this.canRideDown(l)) out.push({ kind: 'down', lift: l, a: h, b: l.a });
+    return out;
+  },
+  foodTime(skill) { return this.routeTime(skill, 'food'); },
+  routeTime(skill, goal) {
+    const key = Net.version + ':' + Math.floor(this.time / 300);
+    if (this._ftKey !== key) { this._ftKey = key; this._ft = {}; }
+    if (this._ft[goal + skill]) return this._ft[goal + skill];
+    const sk = SKILL[skill], dist = new Map(), done = new Set();
+    for (const n of Net.nodes) if (goal === 'food' ? this.hasFood(n) : n.base) dist.set(n, 0);
+    const into = new Map();                          // node -> [ [from node, seconds] ] edges arriving here
+    const edge = (a, b, t) => { if (!into.has(b)) into.set(b, []); into.get(b).push([a, t]); };
+    for (const r of Net.runs) if (!r.planned && r.diff <= sk.maxDiff) edge(r.a, r.b, r.path.length / (sk.speed * 0.9));
+    for (const l of Net.lifts) if (!l.planned && l.opt.open) edge(l.a, l.b, Lifts.waitTime(l) + Lifts.rideTime(l));
+    for (const l of Net.lifts) if (this.canRideDown(l)) edge(l.b, l.a, this.downWait(l) + Lifts.rideTime(l));
+    for (const p of Net.paths) { const t = Math.hypot(p.a.x - p.b.x, p.a.z - p.b.z) / 1.4; edge(p.a, p.b, t); edge(p.b, p.a, t); }
+    for (;;) {
+      let u = null, ud = Infinity;
+      for (const [n, d] of dist) if (!done.has(n) && d < ud) { ud = d; u = n; }
+      if (!u) break;
+      done.add(u);
+      for (const [a, t] of into.get(u) || []) if (ud + t < (dist.has(a) ? dist.get(a) : Infinity)) dist.set(a, ud + t);
+    }
+    return (this._ft[goal + skill] = dist);
+  },
+
+  // Sit down if there's a free seat, otherwise wait for one.
+  sitDown(s, place) {
+    place.eating = place.eating || 0;
+    s.state = 'eat'; s.node = place; s.edge = null; s.place = place; s.d = 0;
+    s.seated = place.eating < this.seats(place);
+    if (s.seated) this.takeSeat(s);
+    else s.queued = 0;
+  },
+  takeSeat(s) {
+    const m = MEALS[s.need.kind], place = s.place;
+    place.eating = (place.eating || 0) + 1; s.seated = true; s.seat = Math.floor(Math.random() * 1e6);
+    s.eatLeft = (m.mins[0] + Math.random() * (m.mins[1] - m.mins[0])) * 60;
+    const late = Math.max(0, (this.time - s.need.at) / 60 - 20);     // got there long after they got hungry
+    s.happy = clamp(s.happy + m.happy - Math.min(10, late / 4), 0, 100);
+    this.money += m.spend; this.stats.food += m.spend; this.stats.meals++;
+    if (place.food) place.food.today = (place.food.today || 0) + m.spend;
+  },
+  leaveTable(s) {
+    if (s.state === 'eat' && s.seated && s.place) s.place.eating = Math.max(0, (s.place.eating || 1) - 1);
+    s.seated = false; s.place = null; s.need = null;
+  },
+  // A hungry guest's best next step towards food: the option whose travel time plus the remaining
+  // time to food from where it ends is lowest. null if no food can be reached from here.
+  towardFood(s, opts) { return this.toward(s, opts, 'food'); },
+  toward(s, opts, goal) {
+    const dist = this.routeTime(s.skill, goal);
+    let best = null, bt = Infinity;
+    for (const [e] of opts) {
+      if (!e.kind) continue;                         // no freeride lines when they're heading somewhere
+      const rest = dist.get(e.b);
+      if (rest == null) continue;
+      const ride = e.kind === 'lift' ? Lifts.waitTime(e) + Lifts.rideTime(e) : e.kind === 'down' ? this.downWait(e.lift) + Lifts.rideTime(e.lift) : e.path.length / (SKILL[s.skill].speed * 0.9);
+      const t = ride + rest + Math.random() * 30;
+      if (t < bt) { bt = t; best = e; }
+    }
+    return best;
   },
 
   reach(node, skill) {
@@ -1000,15 +1328,36 @@ const Game = {
       const n = q.shift();
       for (const m of n.links) if (!seen.has(m)) { seen.add(m); q.push(m); }
       for (const r of n.runs) if (r.a === n && !r.planned && r.diff <= max) return true;
+      if (SKILL[skill].offPiste && this.freeLines(n).length) return true;
       for (const l of n.lifts) if (l.a === n && l.opt.open && !l.planned && !seen.has(l.b)) { seen.add(l.b); q.push(l.b); }
     }
     return false;
   },
 
   liftUseful(l, skill) {
-    if (l._uv !== Net.version) { l._uv = Net.version; l._u = [null, null, null]; }
+    if (l._uv !== Net.version) { l._uv = Net.version; l._u = SKILL.map(() => null); }
     if (l._u[skill] === null) l._u[skill] = this.reach(l.b, skill);
     return l._u[skill];
+  },
+
+  // ---------- freeride ----------
+  // Off-piste lines from node n down to a lodge or a lift bottom: cached until the network changes.
+  freeLines(n) {
+    if (this._flv !== Net.version) { this._flv = Net.version; this._fl = new Map(); }
+    if (this._fl.has(n)) return this._fl.get(n);
+    const out = [];
+    for (const t of Net.nodes) {
+      if (t === n || n.y - t.y < 120) continue;
+      const d = Math.hypot(t.x - n.x, t.z - n.z);
+      if (d < 250 || d > 3500) continue;
+      if (!Net.hubOf(t).some((h) => h.base || h.lifts.some((l) => l.a === h && !l.planned))) continue;
+      const line = traceFreeride(n, t);
+      if (line) out.push(line);
+    }
+    out.sort((a, b) => b.drop - a.drop);
+    out.length = Math.min(out.length, 4);           // the few biggest lines from here
+    this._fl.set(n, out);
+    return out;
   },
 
   canStart(n0, skill) {
@@ -1018,6 +1367,19 @@ const Game = {
 
   decide(s) {
     const n = s.node, sk = SKILL[s.skill], tired = s.done >= s.want, hubs = Net.hubOf(n), atBase = hubs.some((h) => h.base);
+    if (!s.need && s.meals && s.meals.length && this.time >= s.meals[0].at) s.need = s.meals.shift();
+    if (s.need && this.time - s.need.at > 75 * 60) {          // gave up looking for food
+      s.happy -= s.need.kind === 'lunch' ? 12 : 4; this.stats.hungry++; s.need = null;
+      this.warn('hungry', 'Guests are hungry and can\'t get to anywhere to eat in time. Build a mountain hut or a restaurant near your lifts.');
+    }
+    if (s.need) {
+      const places = hubs.filter((h) => this.hasFood(h));
+      if (places.length) {
+        // the place with the most free seats here (a hut beside a lodge: whichever is emptier)
+        places.sort((a, b) => (this.seats(b) - (b.eating || 0)) - (this.seats(a) - (a.eating || 0)));
+        return this.sitDown(s, places[0]);
+      }
+    }
     if (atBase && tired) return this.leave(s);
     if (s.done >= s.want + 4) return this.leave(s);
     const opts = [];
@@ -1032,9 +1394,36 @@ const Game = {
       // pick by expected wait + ride time; beginners avoid T-bars, everyone likes a warm cabin
       let w = 3 / (1 + (Lifts.waitTime(l) + Lifts.rideTime(l) * 0.3) / 300);
       if (l.T.beginnerPenalty && s.skill === 0) w *= 0.3;
+      if (sk.crowd) w *= Math.exp(-sk.crowd * Lifts.waitTime(l) / 600);           // better skiers dodge the queues
       if (s.cameBy && s.cameBy.line && s.cameBy.line === l.line && !tired) w *= 4;   // stay seated through the station
       w *= 1 + (l.T.comfort || 0) * 0.05;
       opts.push([l, w]);
+    }
+    if (sk.offPiste) for (const h of hubs) for (const line of this.freeLines(h)) {
+      const t = line.to, end = Net.hubOf(t);
+      if (!end.some((x) => x.base) && !this.canStart(t, s.skill)) continue;     // must lead somewhere open
+      let w = sk.offPiste * clamp(line.drop / 300, 0.5, 2) * (line !== s.lastLine ? 1 : 0.5);
+      if (tired && end.some((x) => x.base)) w *= 4;
+      opts.push([line, w]);
+    }
+    // heading somewhere (food, or home when tired): any run they can ski, any open lift, or a ride down
+    const downs = this.downRides(hubs);
+    const goalOpts = () => {
+      const all = opts.filter(([e]) => e.kind === 'run').map(([e]) => [e, 1]);
+      for (const h of hubs) for (const l of h.lifts) if (l.a === h && l.opt.open && !l.planned) all.push([l, 1]);
+      return all.concat(downs.map((d) => [d, 1]));
+    };
+    if (s.need) {
+      const go = this.toward(s, goalOpts(), 'food');
+      if (go) { opts.length = 0; opts.push([go, 1]); }
+    } else if (tired && !atBase) {
+      const go = this.toward(s, goalOpts(), 'home');
+      if (go) { opts.length = 0; opts.push([go, 1]); }
+    }
+    if (!opts.length && downs.length) {
+      // nothing they can ski from here: ride down rather than walk, ideally to where they can carry on
+      const ok = downs.filter((d) => Net.hubOf(d.b).some((h) => h.base) || this.canStart(d.b, s.skill));
+      opts.push([(ok.length ? ok : downs)[0], 1]);
     }
     if (!opts.length) {
       if (atBase) {
@@ -1045,6 +1434,17 @@ const Game = {
     }
     let t = Math.random() * opts.reduce((a, o) => a + o[1], 0), pick = opts[0][0];
     for (const [e, w] of opts) { t -= w; if (t <= 0) { pick = e; break; } }
+    if (pick.kind === 'down') {                       // ride an enclosed lift back down
+      const l = pick.lift;
+      if (!l.downQueue) { l.downQueue = []; l.downCarriers = []; }
+      s.edge = l; s.down = true; s.state = 'queue'; s.wait = 0; s.cameBy = null; s.node = pick.a;
+      l.downQueue.push(s);
+      return;
+    }
+    if (pick.path && !pick.kind) {                   // an off-piste line
+      s.line = pick; s.lastLine = pick; s.state = 'free'; s.d = 0; s.cameBy = null; s.edge = null;
+      return;
+    }
     s.edge = pick;
     const through = pick.kind === 'lift' && s.cameBy && s.cameBy.line && s.cameBy.line === pick.line;
     s.cameBy = null;
@@ -1061,7 +1461,7 @@ const Game = {
   },
 
   leave(s) {
-    if (s.state === 'queue' && s.edge) { const q = s.edge.queue, i = q.indexOf(s); if (i >= 0) q.splice(i, 1); }
+    if (s.state === 'queue' && s.edge) { const q = s.down ? s.edge.downQueue || [] : s.edge.queue, i = q.indexOf(s); if (i >= 0) q.splice(i, 1); }
     s.state = 'gone'; this._gone = true;
     s.happy = clamp(s.happy, 0, 100);
     this.rep += (s.happy - this.rep) * (s.happy < this.rep ? 0.03 : 0.015); // bad news travels faster
@@ -1099,6 +1499,28 @@ const Game = {
         }
         break;
       }
+      case 'eat':
+        if (!s.seated) {                               // waiting for a table
+          s.queued += dt; s.happy -= dt * 0.006;
+          if ((s.place.eating || 0) < this.seats(s.place)) this.takeSeat(s);
+          else if (s.queued > 20 * 60) { this.warn('full', `${s.place.food ? s.place.food.name : s.place.name} is full and guests are walking away hungry. Build more restaurants.`); this.stats.hungry++; s.happy -= 6; this.leaveTable(s); s.state = 'atNode'; }
+        } else {
+          s.eatLeft -= dt;
+          if (s.eatLeft <= 0) { const p = s.place; this.leaveTable(s); s.state = 'atNode'; s.node = p.food && p.links.length ? p.links.find((m) => !m.food) || p.links[0] : p; }
+        }
+        break;
+      case 'free': {
+        const L = s.line, p = L.path.at(s.d, TMP);
+        const steep = clamp(-p.dy / Math.max(0.2, Math.hypot(p.dx, p.dz)), 0, 1);
+        s.d += SKILL[s.skill].speed * s.pace * (0.6 + 0.6 * Math.min(1, steep / 0.6)) * dt;
+        if (s.d >= L.path.length) {
+          s.happy = clamp(s.happy + 9 * clamp(L.drop / 300, 0.25, 1.5) + 2, 0, 100);   // fresh tracks
+          s.done++; this.stats.freeride = (this.stats.freeride || 0) + 1;
+          s.state = 'atNode'; s.node = L.to; s.line = null; s.last = null;
+          if (!Net.nodes.includes(L.to)) this.strand(s);                      // that lift was removed meanwhile
+        }
+        break;
+      }
       case 'walk':
         s.d += 2.5 * dt;
         if (s.d >= s.walk.len) { s.state = 'atNode'; s.node = s.walk.to; }
@@ -1109,7 +1531,8 @@ const Game = {
   endDay() {
     for (const s of this.skiers) if (s.state !== 'gone') this.leave(s);
     this.skiers = [];
-    for (const l of Net.lifts) { l.queue.length = 0; l.carriers.length = 0; l.ridesYesterday = l.ridesToday; l.ridesToday = 0; }
+    for (const l of Net.lifts) { l.queue.length = 0; l.carriers.length = 0; l.downQueue = []; l.downCarriers = []; l.ridesYesterday = l.ridesToday; l.ridesToday = 0; l.downsYesterday = l.downsToday || 0; l.downsToday = 0; }
+    for (const n of Net.nodes) { n.eating = 0; if (n.food) { n.food.yesterday = n.food.today || 0; n.food.today = 0; } }
     const ops = this.dailyCost();
     this.money -= ops;
     this.stats.ops = ops;
@@ -1126,6 +1549,7 @@ const Game = {
     let ops = Net.lifts.some((l) => !l.planned) || Net.runs.some((r) => !r.planned) ? FIXED_OP : 0;
     for (const l of Net.lifts) if (!l.planned) ops += Lifts.dailyCost(l);
     for (const r of Net.runs) if (!r.planned) ops += r.len * RUN_OP_PER_M;
+    for (const n of Net.nodes) if (n.food) ops += FOOD_TYPES[n.food.type].op;
     return ops;
   },
 
@@ -1133,7 +1557,9 @@ const Game = {
     return {
       v: 1, key: this.map.key, money: this.money, day: this.day, time: this.dayOver ? DAY_END : this.time,
       rep: this.rep, debtDays: this.debtDays, stats: this.stats,
-      nodes: Net.nodes.filter((n) => !n.base).map((n) => (n.links.length ? { id: n.id, x: n.x, z: n.z, links: n.links.map((m) => m.id) } : { id: n.id, x: n.x, z: n.z })),
+      nodes: Net.nodes.filter((n) => !n.base).map((n) => Object.assign({ id: n.id, x: n.x, z: n.z },
+        n.links.length ? { links: n.links.map((m) => m.id) } : {},
+        n.food ? { food: { type: n.food.type, name: n.food.name, rot: n.food.rot, drop: n.food.drop } } : {})),
       bases: Net.nodes.filter((n) => n.base).map((n) => ({ id: n.id, name: n.name })),
       lifts: Net.lifts.map((l) => ({ type: l.type, a: l.a.id, b: l.b.id, opt: l.opt, name: l.name, towers: l.customTowers, planned: l.planned || undefined, line: l.line || undefined })),
       runs: Net.runs.map((r) => ({ a: r.a.id, b: r.b.id, points: r.points, gradeDeg: r.gradeDeg, diff: r.diff, maxG: r.maxG, piste: r.piste, planned: r.planned || undefined })),
@@ -1148,7 +1574,7 @@ const Game = {
     if (this.earthworks.length) Net.refreshHeights();
     const byId = new Map();
     for (const b of d.bases) { const n = Net.nodes.find((x) => x.base && x.name === b.name); if (n) byId.set(b.id, n); }
-    for (const n of d.nodes) byId.set(n.id, Net.addNode(n.x, n.z));
+    for (const n of d.nodes) byId.set(n.id, Net.addNode(n.x, n.z, n.food ? { food: { ...n.food } } : {}));
     for (const n of d.nodes) for (const m of n.links || []) if (byId.get(m)) Net.linkNodes(byId.get(n.id), byId.get(m));
     const P = (n) => ({ x: n.x, z: n.z, node: n });
     for (const l of d.lifts) {
@@ -1206,6 +1632,24 @@ const Game = {
         const off = Math.sin(s.d / 28 + s.wig) * RUN_WIDTH * 0.33;
         const x = p.x - (p.dz / h) * off, z = p.z + (p.dx / h) * off;
         putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
+      } else if (s.state === 'eat' && s.seated && s.place) {
+        const p = s.place, k = s.seat;
+        if (p.food) {
+          const T = FOOD_TYPES[p.food.type], td = p.food.type === 'hut' ? 12 : 16, cols = Math.floor((T.w + 2) / 3), rows = Math.floor(td / 3) - 1;
+          if (k % 3 === 0 || (k >> 2) % (cols * rows) >= cols * rows) continue;   // some sit inside
+          const c = (k >> 2) % cols, r = Math.floor(((k >> 2) % (cols * rows)) / cols);
+          const lx = -T.w / 2 - 1 + 1.5 + c * 3, lz = T.d / 2 - 0.5 + r * 3, ro = p.food.rot || 0;
+          putSkier(p.x + lx * Math.cos(ro) + lz * Math.sin(ro), p.y + 3.6, p.z - lx * Math.sin(ro) + lz * Math.cos(ro), 0.8, s.skill);
+        } else {
+          if (k % 2) continue;                          // half sit inside the lodge
+          const a = (k % 360) * Math.PI / 180, rr = 30 + (k % 13);
+          putSkier(p.x + Math.cos(a) * rr * 0.9, Terrain.height(p.x + Math.cos(a) * rr * 0.9, p.z + Math.sin(a) * rr * 0.7) + 3.5, p.z + Math.sin(a) * rr * 0.7, 0.8, s.skill);
+        }
+      } else if (s.state === 'free') {
+        const p = s.line.path.at(s.d, TMP), h = Math.hypot(p.dx, p.dz) || 1;
+        const off = Math.sin(s.d / 12 + s.wig) * 7;                          // short, quick turns
+        const x = p.x - (p.dz / h) * off, z = p.z + (p.dx / h) * off;
+        putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
       } else if (s.state === 'walk') {
         const t = s.d / (s.walk.len || 1), x = s.walk.x + (s.walk.to.x - s.walk.x) * t, z = s.walk.z + (s.walk.to.z - s.walk.z) * t;
         putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
@@ -1247,6 +1691,12 @@ const Game = {
           } else putSkier(p.x + px * (k ? 1.5 : -1.5), p.y + 5.5, p.z + pz * (k ? 1.5 : -1.5), 0.8, s.skill);
         });
       }
+      (l.downQueue || []).forEach((s, k) => {                      // waiting at the top to ride down
+        if (k >= 60) return;
+        const row = Math.floor(k / 6), col = (k % 6) - 2.5;
+        const x = l.b.x - ux * (14 + row * 5) - px * (T.gauge + 14 + col * 2.5), z = l.b.z - uz * (14 + row * 5) - pz * (T.gauge + 14 + col * 2.5);
+        putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
+      });
       l.queue.forEach((s, k) => {
         const row = Math.floor(k / 6), col = (k % 6) - 2.5;
         const x = l.a.x - ux * (34 + row * 7) + px * col * 6, z = l.a.z - uz * (34 + row * 7) + pz * col * 6;
@@ -1266,8 +1716,25 @@ const Save = {
   get(name) { try { return JSON.parse(localStorage.getItem(name)); } catch { return null; } },
   set(name, v) { try { localStorage.setItem(name, JSON.stringify(v)); } catch { /* storage unavailable */ } },
   read(k) { return this.get(this.key(k)); },
-  write() { if (Game.map && !Game.over) this.set(this.key(Game.map.key), Game.serialize()); },
-  clear(k) { try { localStorage.removeItem(this.key(k)); } catch { /* ignore */ } },
+  // sync bookkeeping per resort: rev counts local writes, pushed = rev the cloud has, syncedAt = cloud version we're based on
+  meta(k) { return Object.assign({ rev: 0, pushed: 0, syncedAt: null, savedAt: null }, this.get('skiresort.meta.' + k)); },
+  setMeta(k, m) { this.set('skiresort.meta.' + k, m); },
+  changed(k) { const m = this.meta(k); m.rev++; m.savedAt = Date.now(); this.setMeta(k, m); return m; },
+  lastWrite: null,
+  write(final) {
+    if (!Game.map || Game.over) return;
+    const k = Game.map.key;
+    this.set(this.key(k), Game.serialize());
+    this.changed(k);
+    this.lastWrite = Date.now();
+    Cloud.queue(k, final);
+    if (Cloud.onState) Cloud.onState();
+  },
+  clear(k) {
+    try { localStorage.removeItem(this.key(k)); } catch { /* ignore */ }
+    const m = this.meta(k); m.rev = m.pushed = 0; m.force = true; this.setMeta(k, m);  // the next save replaces the cloud copy
+    Cloud.remove(k);
+  },
   best(k) { return this.get('skiresort.best.' + k); },
   record(k, days) { const b = this.best(k); if (!b || days > b.days) this.set('skiresort.best.' + k, { days }); },
 
@@ -1294,5 +1761,169 @@ const Save = {
   importData(d) {
     this.set(this.key(d.resort), d.save);
     if (d.best) this.record(d.resort, d.best.days);
+    const m = this.changed(d.resort); m.force = true; this.setMeta(d.resort, m);   // an imported file wins over the cloud copy
+    Cloud.queue(d.resort, true);
+  },
+};
+
+// ---------- cloud saves: progress stored on the save server (server.js) under a player ID ----------
+const PLAYER_ID_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;
+const Cloud = {
+  ALPHA: '0123456789ABCDEFGHJKMNPQRSTVWXYZ',      // Crockford base32: no I, L, O, U
+  PUSH_GAP: 15000,
+  state: 'off',            // off (no server) · checking · ok · saving · offline · conflict
+  lastSync: null, onState: null, onConflict: null, playing: null,
+  timers: {}, lastPush: {}, blocked: {}, inflight: {},
+
+  server() {
+    let s = null;
+    try { s = localStorage.getItem('skiresort.server'); } catch { /* ignore */ }
+    if (s) return s.replace(/\/+$/, '');
+    return /^https?:$/.test(location.protocol) ? location.origin : null;   // the game was opened from server.js
+  },
+  setServer(url) {
+    try { if (url) localStorage.setItem('skiresort.server', url); else localStorage.removeItem('skiresort.server'); } catch { /* ignore */ }
+  },
+  normalizeServer(text) {
+    let t = String(text || '').trim();
+    if (!t) return null;
+    if (!/^https?:\/\//i.test(t)) t = 'http://' + t;
+    try { const u = new URL(t); return u.origin; } catch { return null; }
+  },
+
+  // ---- player ID ----
+  id() {
+    let v = null;
+    try { v = localStorage.getItem('skiresort.player'); } catch { /* ignore */ }
+    if (!PLAYER_ID_RE.test(v || '')) {
+      const r = new Uint8Array(10); crypto.getRandomValues(r);
+      v = Array.from(r, (b) => this.ALPHA[b & 31]).join('');
+      try { localStorage.setItem('skiresort.player', v); } catch { /* ignore */ }
+    }
+    return v;
+  },
+  setId(v) { try { localStorage.setItem('skiresort.player', v); } catch { /* ignore */ } },
+  pretty(id) { return id.slice(0, 5) + '-' + id.slice(5); },
+  // accept what people type: spaces, dashes, lower case, O for 0, I/L for 1
+  parseId(text) {
+    const v = String(text || '').toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
+    return PLAYER_ID_RE.test(v) ? v : null;
+  },
+
+  set(state) { this.state = state; if (this.onState) this.onState(); },
+  url(id, resort) { return `${this.server()}/api/players/${id}` + (resort ? '/' + resort : ''); },
+
+  // GET a player's saves: the doc, null (no such player), or throws when the server can't be reached
+  async fetchPlayer(id) {
+    const r = await fetch(this.url(id), { cache: 'no-store' });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error('server error ' + r.status);
+    return r.json();
+  },
+
+  // take the cloud copy of one resort into this browser
+  take(k, c) {
+    Save.set(Save.key(k), c.save);
+    if (c.best) Save.record(k, c.best.days);
+    const m = Save.meta(k); m.pushed = m.rev; m.syncedAt = c.updatedAt; m.savedAt = c.savedAt; delete m.force;
+    Save.setMeta(k, m); delete this.blocked[k];
+  },
+
+  // menu: bring this browser and the cloud up to date. Returns { conflicts: { resort: cloudEntry } }
+  async sync() {
+    const out = { conflicts: {} };
+    if (!this.server()) { this.set('off'); return out; }
+    this.set('checking');
+    let doc;
+    try { doc = await this.fetchPlayer(this.id()); } catch { this.set('offline'); return out; }
+    if (this.playing) return out;            // a game was started meanwhile: don't swap saves under it
+    const resorts = (doc && doc.resorts) || {};
+    for (const k of Object.keys(window.SKI_MAPS)) {
+      const c = resorts[k], m = Save.meta(k), local = Save.read(k), dirty = !!local && m.rev !== m.pushed;
+      if (c && c.updatedAt !== m.syncedAt && !m.force) {
+        if (!dirty) this.take(k, c);           // saved on another computer, nothing new here: use it
+        else out.conflicts[k] = c;             // both changed since they last agreed: the player chooses
+      } else if (local && (dirty || !c)) {
+        if (!c && m.syncedAt) { m.syncedAt = null; m.force = true; Save.setMeta(k, m); }   // gone from the cloud: upload it again
+        this.queue(k, true);                   // progress made here (maybe offline) that the cloud lacks
+      }
+    }
+    this.lastSync = Date.now();
+    this.set(Object.keys(out.conflicts).length ? 'conflict' : 'ok');
+    return out;
+  },
+
+  // player picked one side of a conflict
+  keepLocal(k) { const m = Save.meta(k); m.force = true; Save.setMeta(k, m); delete this.blocked[k]; this.queue(k, true); },
+
+  queue(k, now) {
+    if (!this.server() || this.blocked[k]) return;
+    if (now) { clearTimeout(this.timers[k]); this.timers[k] = null; this.push(k, true); return; }
+    if (this.timers[k]) return;
+    const wait = Math.max(0, this.PUSH_GAP - (Date.now() - (this.lastPush[k] || 0)));
+    this.timers[k] = setTimeout(() => { this.timers[k] = null; this.push(k); }, wait);
+  },
+
+  async push(k, keepalive) {
+    if (!this.server() || this.blocked[k]) return;
+    if (this.inflight[k]) { this.inflight[k].again = true; return; }
+    const m = Save.meta(k), save = Save.read(k);
+    if (!save || (m.rev === m.pushed && !m.force)) return;
+    const rev = m.rev;
+    const body = JSON.stringify({ base: m.syncedAt, force: !!m.force, save, best: Save.best(k), savedAt: m.savedAt });
+    let done; const job = this.inflight[k] = { again: false, p: new Promise((r) => { done = r; }) };
+    this.lastPush[k] = Date.now();
+    if (this.state !== 'conflict') this.set('saving');
+    try {
+      // POST with a text body is a "simple" request: no preflight, and keepalive lets it finish while the tab closes
+      const r = await fetch(this.url(this.id(), k), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body,
+        keepalive: !!keepalive && body.length < 60000 });
+      if (r.status === 409) {
+        this.blocked[k] = true; this.set('conflict');
+        if (this.onConflict) this.onConflict(k);
+        return;
+      }
+      if (!r.ok) throw new Error('server error ' + r.status);
+      const j = await r.json();
+      const m2 = Save.meta(k);
+      m2.syncedAt = j.updatedAt; m2.pushed = rev; delete m2.force;
+      Save.setMeta(k, m2);
+      this.lastSync = Date.now();
+      this.set('ok');
+    } catch {
+      this.set('offline');
+    } finally {
+      this.inflight[k] = null; done();
+      if (job.again) this.queue(k);
+    }
+  },
+
+  // push now and wait for it (at most `ms`), e.g. before leaving the page
+  async flush(k, ms = 4000) {
+    clearTimeout(this.timers[k]); this.timers[k] = null;
+    const go = async () => { if (this.inflight[k]) await this.inflight[k].p; await this.push(k); };
+    await Promise.race([go(), new Promise((r) => setTimeout(r, ms))]);
+  },
+
+  // a new game replaces the old one: drop the cloud copy right away (the next save would overwrite it anyway)
+  async remove(k) {
+    if (!this.server()) return;
+    clearTimeout(this.timers[k]); this.timers[k] = null; delete this.blocked[k];
+    try {
+      const r = await fetch(this.url(this.id(), k) + '?force=1', { method: 'DELETE' });
+      if (r.ok) { const m = Save.meta(k); if (m.rev === 0) { m.syncedAt = null; delete m.force; Save.setMeta(k, m); } }
+    } catch { /* offline: the forced next save replaces it */ }
+  },
+
+  // switch this computer to another player ID: its saves replace the ones here; resorts it doesn't have are kept and uploaded
+  adopt(id, doc) {
+    this.setId(id);
+    this.blocked = {};
+    const resorts = (doc && doc.resorts) || {};
+    for (const k of Object.keys(window.SKI_MAPS)) {
+      if (resorts[k]) this.take(k, resorts[k]);
+      else if (Save.read(k)) { const m = Save.changed(k); m.syncedAt = null; m.force = true; Save.setMeta(k, m); this.queue(k, true); }
+      else { Save.setMeta(k, { rev: 0, pushed: 0, syncedAt: null, savedAt: null }); }
+    }
   },
 };

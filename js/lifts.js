@@ -152,6 +152,16 @@ const Lifts = {
   },
   defaultOpt() { return { speed: 1, density: 1, open: true }; },
 
+  // Station look for detachable chairs and gondolas: 'hood' (a long glass canopy on a girder, like modern
+  // gondola stations), 'building' (stone-clad ground floor, clad hall with a window band and leaning
+  // ends) or 'classic' (the open gabled hall). Gondolas default to the canopy, chairs to the classic hall.
+  STATION_STYLES: { hood: 'Modern canopy', building: 'Station building', classic: 'Classic hall' },
+  stationStyle(l) {
+    const T = l.T;
+    if (T.kind !== 'aerial' || T.station3d === 'fixed') return 'classic';
+    return l.opt.station || (T.enclosed ? 'hood' : 'classic');
+  },
+
   // per-lift look
   pylonType(l, t = null) {
     const ok = l.T.pylons || [];
@@ -268,6 +278,11 @@ const Lifts = {
   // incoming angle a1 to the outgoing a2. Linked pylons (up to 4) share one long battery: the rope follows
   // a smooth curve through their heads, so a big bend is spread over all their wheels.
   trains(T, P) {
+    // twice: the second pass lets each linked train aim at the trains that are actually beside it
+    const first = this.trainsPass(T, P, null);
+    return first.some((t) => t.linked) ? this.trainsPass(T, P, first) : first;
+  },
+  trainsPass(T, P, prior) {
     const out = [], pr = P.prof;
     if (T.kind === 'belt') return out;
     const surface = T.kind === 'surface', r = surface ? 0.9 : WHEEL_R, sp = surface ? 2.2 : WHEEL_SP;
@@ -290,18 +305,45 @@ const Lifts = {
         for (let w = 0; w < n; w++) wheelS.push(s0 + w * sp);
         perWheel = deg / n;
       } else {
-        // the linked group acts as one long train: a single even curve centred on the group, at the
-        // members' mean head height; every member's head then rides on that curve
+        // The linked group acts as one long train: a single even curve through the members' heads
+        // (at their mean height). It reaches out past the outer pylons, as each pylon's own train
+        // would, as far as the bend needs, and its ends are tangent to the spans running onto and off
+        // it, so the whole deflection is shared by its wheels with no kink where the rope arrives.
         const sA = first.s, sB = Math.max(last.s, sA + 1), c = (sA + sB) / 2;
         let yC = 0; for (let m = i; m <= j; m++) yC += pr[m].y; yC /= j - i + 1;
-        const v = { s: c, y: yC };
-        const b1 = Math.atan2(yC - P.cableY(prev, v, c - 4), 4), b2 = Math.atan2(P.cableY(v, next, c + 4) - yC, 4);
-        a1 = b1; a2 = b2; bend = a1 - a2; deg = Math.abs(bend) * 180 / Math.PI; press = bend >= 0;
+        const before = out.length && out[out.length - 1].j === i - 1 ? out[out.length - 1] : null;
+        const from = before ? { s: before.s1, y: before.yAt(before.s1) } : prev;   // where the incoming span starts
+        a1 = Math.atan2(first.y - P.cableY(from, first, first.s - 4), 4);
+        const after = prior && prior.find((t) => t.i === j + 1);
+        const to = after ? { s: after.s0, y: after.yAt(after.s0) } : next;            // where the outgoing span ends
+        a2 = Math.atan2(P.cableY(last, to, last.s + 4) - last.y, 4);
+        // Solve for the curve y(s) = Y0 + m0 (s - s0) + (m1 - m0) / (2 L) (s - s0)^2: through the heads'
+        // mean height at the centre, tangent at s0 to the sagging span coming in and at s1 to the one
+        // going out. Three linear equations in Y0, m0, m1.
+        const sag = P.sag || 0;
+        const fit = (ext) => {
+          s0 = sA - ext; s1 = sB + ext;
+          const L = s1 - s0, Din = s0 - from.s, Dout = to.s - s1;
+          const M = [[1, 3 * L / 8, L / 8], [1, -Din, 0], [-1, -L / 2, -(L / 2 + Dout)]];
+          const v = [yC, from.y - 4 * sag * Din, 4 * sag * Dout - to.y];
+          const det = (A) => A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+          const D = det(M), col = (k) => M.map((row, r) => row.map((x, c2) => (c2 === k ? v[r] : x)));
+          return { L, Y0: det(col(0)) / D, m0: det(col(1)) / D, m1: det(col(2)) / D };
+        };
+        // reach out past the outer pylons as far as the bend needs, but stay clear of the neighbours
+        const room = Math.max(sp, Math.min(sA - from.s, to.s - sB) - 6);
+        let f = fit(Math.min(2 * sp, room));
+        for (let it = 0; it < 2; it++) {
+          const dg = Math.abs(Math.atan(f.m0) - Math.atan(f.m1)) * 180 / Math.PI;
+          const need = (Math.ceil(dg / (MAX_BEND * 0.8)) - 1) * sp;          // keeps every wheel well inside the limit
+          f = fit(Math.min(room, clamp((need - (sB - sA)) / 2, 2 * sp, 7 * sp)));
+        }
+        a1 = Math.atan(f.m0); a2 = Math.atan(f.m1);
+        bend = a1 - a2; deg = Math.abs(bend) * 180 / Math.PI; press = bend >= 0;
         if (!(first.mode && first.mode !== 'auto')) mode = press ? 'support' : 'hold';
-        s0 = sA - sp; s1 = sB + sp;
-        const Lt = s1 - s0, tilt = (a1 + a2) / 2;
-        yAt = (s) => yC + Math.tan(tilt) * (s - c) - (bend / (2 * Lt)) * (s - c) * (s - c);
-        slopeAt = (s) => Math.tan(tilt) - (bend / Lt) * (s - c);
+        const Lt = f.L, k = (f.m1 - f.m0) / Lt, S0 = s0, m = f.m0, Y0 = f.Y0;
+        yAt = (s) => Y0 + m * (s - S0) + (k / 2) * (s - S0) * (s - S0);
+        slopeAt = (s) => m + k * (s - S0);
         const nMax = Math.floor(Lt / sp) + 1;
         n = Math.max(2, Math.min(nMax, first.wheels || nMax));
         for (let w = 0; w < n; w++) wheelS.push(s0 + (Lt * w) / (n - 1));
@@ -422,7 +464,8 @@ const Lifts = {
     const lam = (c, o = {}) => new THREE.MeshLambertMaterial(Object.assign({ color: c }, o));
     this.M = {
       steel: lam(0x7b828b), dark: lam(0x2b2f35), rubber: lam(0x1a1c20), concrete: lam(0xb4afa6), roof: lam(0x3d434b),
-      wood: lam(0x9a6a3c), wall: lam(0xe9e4da), belt: lam(0x2a2d31), galv: lam(0xa9b1b8), grate: lam(0x6f767d), rust: lam(0x6e4a32),
+      wood: lam(0x9a6a3c), wall: lam(0xe9e4da), edge: lam(0xf2c230), stone: lam(0x8e8a83), frame: lam(0xc9ccd0),
+      hood: lam(0x4b5f9e, { transparent: true, opacity: 0.78, side: THREE.DoubleSide }), belt: lam(0x2a2d31), galv: lam(0xa9b1b8), grate: lam(0x6f767d), rust: lam(0x6e4a32),
       glass: lam(0x9fd0ff, { transparent: true, opacity: 0.35, depthWrite: false }),
       glassy: lam(0x9fc7ff, { transparent: true, opacity: 0.55 }),
       cable: new THREE.LineBasicMaterial({ color: 0x15171a }),
@@ -812,16 +855,7 @@ const Lifts = {
       }
       return;
     }
-    if (T.kind === 'tram') {
-      const W = g * 2 + 26, L = 50, hgt = H + 10, zc = o * 18;
-      this._box(parts, 'concrete', F, W, hgt, L, 0, hgt / 2 - 2, zc);
-      this._box(parts, 'glass', F, W * 0.7, hgt * 0.6, 0.5, 0, hgt * 0.55, zc - o * (L / 2 + 0.3));   // big glass front
-      this._box(parts, 'dark', F, g * 2 + 8, 9, 0.6, 0, H - 5, zc - o * (L / 2 + 0.4));              // cabin bay
-      this._box(parts, accent, F, W + 1, 1.6, L + 1, 0, hgt - 1.2, zc);
-      this._box(parts, 'roof', F, W + 2, 0.8, L + 2, 0, hgt - 0.2, zc);
-      for (const sx of [-1, 1]) this._box(parts, 'dark', F, 2, 2, 6, sx * g, H, zc + o * (L / 2 - 4));  // rope anchors
-      return;
-    }
+    if (T.kind === 'tram') return this.tramStation(parts, F, T, o, drive);
     if (T.station3d === 'fixed') {
       // fixed-grip: open bullwheel on a column, small canopy, wooden loading deck, operator hut
       this._box(parts, 'concrete', F, g * 2 + 10, 1.2, 16, 0, 0, o * 2);
@@ -841,6 +875,13 @@ const Lifts = {
     // detachable / gondola terminal: concrete plinth, columns, glass walls, gabled roof, bullwheel inside
     const big = T.model === 'cabin3s' || T.model === 'funitel';
     const W = (g + ext) * 2 + 12, L = big ? 62 : T.enclosed ? 50 : 42, zc = o * (L / 2 - 8);
+    const style = this.stationStyle(l);
+    if (style !== 'classic') {
+      this._shell(parts, F, T, style, o, -8, L - 8, { front: true, back: false });
+      this._bullwheel(parts, F, g, 0, H, o * (L - 12));
+      for (const sx of [-1, 1]) this._box(parts, 'dark', F, 0.5, 0.5, L - 14, sx * g, H + 0.6, zc - o * 2);
+      return;
+    }
     this._hall(parts, F, T, W, L, zc, o);
     this._bullwheel(parts, F, g, 0, H, o * (L - 12));
     for (const sx of [-1, 1]) this._box(parts, 'dark', F, 0.5, 0.5, L - 14, sx * g, H + 0.6, zc - o * 2);   // station rail
@@ -853,7 +894,235 @@ const Lifts = {
     }
   },
 
+  // Height of the boarding deck: where the carriers' floor hangs at the station (they are drawn
+  // CS times real size, so it is well above the ground; the deck is raised to meet them).
+  deckY(T) {
+    this._deck = this._deck || {};
+    if (this._deck[T.model] == null) {
+      const g = this.carrierGeometry(T.model); g.computeBoundingBox();
+      this._deck[T.model] = Math.max(1.5, T.towerH + g.boundingBox.min.y - 0.25); g.dispose();
+    }
+    return this._deck[T.model];
+  },
+  // a straight prism: quad profile [[w, y] x 4] (w = outward distance) extruded across x0..x1
+  _prism(parts, key, F, o, x0, x1, prof) {
+    const sh = new THREE.Shape(prof.map(([w, y]) => new THREE.Vector2(-o * w, y)));
+    const g = new THREE.ExtrudeGeometry(sh, { depth: x1 - x0, bevelEnabled: false });
+    g.rotateY(Math.PI / 2); g.translate(x0, 0, 0);
+    parts.add(key, g, F);
+  },
+
+  // Modern station shells around the rail between outward distances wA..wB (z = o * w).
+  // opts.front / opts.back: that end is where the line enters (left open).
+  _shell(parts, F, T, style, o, wA, wB, opts = {}) {
+    const H = T.towerH, g = T.gauge, ext = Math.max(0, ...(T.ropes || [0]).map(Math.abs));
+    if (!opts.back) wB = Math.max(wB, wB - 4 + g + 2);            // the terminal's bullwheel stays inside
+    const hw = g + ext + 7 + (opts.extraW || 0), fy = this.deckY(T), len = wB - wA;
+    const box = (key, x0, x1, y0, y1, w0, w1, rx = 0) =>
+      this._box(parts, key, F, Math.abs(x1 - x0), y1 - y0, Math.abs(w1 - w0), (x0 + x1) / 2, (y0 + y1) / 2, o * (w0 + w1) / 2, rx);
+    // how far the ground drops under the building, for foundations and piers
+    let low = -3;
+    const pv = new THREE.Vector3(), node = new THREE.Vector3().setFromMatrixPosition(F);
+    for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) {
+      pv.set(-hw + (2 * hw * i) / 4, 0, o * (wA + (len * j) / 4)).applyMatrix4(F);
+      low = Math.min(low, Terrain.height(pv.x, pv.z) - node.y - 2);
+    }
+    // boarding deck at the carriers' floor: around the cabins' path, with railings
+    const xi = g - 3.6, xo = g + 3.6, d0 = wA + 4, d1 = wB - 6;
+    box('concrete', -xi, xi, fy - 0.8, fy, d0, d1);
+    for (const sx of [-1, 1]) {
+      box('concrete', sx * xo, sx * hw, fy - 0.8, fy, d0, d1);
+      box('edge', sx * xo, sx * (xo + 0.5), fy, fy + 0.06, d0, d1);
+      box('edge', sx * (xi - 0.5), sx * xi, fy, fy + 0.06, d0, d1);
+      for (let w = d0; w <= d1; w += 4) this._strut(parts, 'galv', F, [sx * (hw - 0.3), fy, o * w], [sx * (hw - 0.3), fy + 1.1, o * w], 0.1);
+      this._strut(parts, 'galv', F, [sx * (hw - 0.3), fy + 1.1, o * d0], [sx * (hw - 0.3), fy + 1.1, o * d1], 0.12);
+    }
+
+    if (style === 'hood') {
+      // piers under the deck, a stair up to it, the main girder on central columns
+      for (const sx of [-1, 1]) for (const w of [d0 + 2, (d0 + d1) / 2, d1 - 2]) box('concrete', sx * (hw - 2.5), sx * (hw - 0.8), low, fy - 0.8, w - 0.9, w + 0.9);
+      const steps = Math.max(1, Math.ceil(fy / 0.55)), rise = fy / steps, sx = -1;
+      if (opts.joint !== 'front') for (let k = 0; k < steps; k++) box('concrete', sx * (hw + 0.2), sx * (hw + 3.4), low, rise * (k + 1), d0 + 0.9 * k, d0 + 0.9 * (k + 1));
+      if (opts.joint !== 'front') this._strut(parts, 'galv', F, [sx * (hw + 3.3), 1.1, o * d0], [sx * (hw + 3.3), fy + 1.1, o * (d0 + 0.9 * steps)], 0.12);
+      const gy0 = H + 1.4, gy1 = H + 4.6;
+      box('frame', -(g - 3), g - 3, gy0, gy1, wA + 3, wB - 4);
+      for (const w of opts.back ? [wA + 8, (wA + wB) / 2, wB - 8] : [wA + 8, wB - 16]) box('frame', -1.3, 1.3, low, gy0, w - 1.3, w + 1.3);
+      box('frame', -(g - 1), g - 1, gy0 - 0.4, gy1 + 0.6, wB - 16, wB - 4);          // bullwheel housing
+      // the hood: half a stretched capsule over the rail, glass with a red outline and roof rib
+      const base = H + 2.2, hh = 6.5 + (T.enclosed ? 0.5 : 0), hwH = g + ext + 4.8 + (opts.extraW || 0) * 0.6;
+      // at an angle station the two wings' hoods are cut square where they meet (a mitred joint)
+      const mit = opts.bend != null ? hwH * Math.tan(opts.bend / 2) + 1 : 0;
+      const hA = opts.joint === 'front' ? -mit : wA - 1, hB = opts.joint === 'back' ? mit : wB + 1;
+      const nA = opts.joint === 'front' ? 0 : 8, nB = opts.joint === 'back' ? 0 : 8, bA = hA + nA, bB = hB - nB;
+      const sAt = (w) => (w < bA ? Math.sqrt(Math.max(0, 1 - ((bA - w) / nA) ** 2)) : w > bB ? Math.sqrt(Math.max(0, 1 - ((w - bB) / nB) ** 2)) : 1);
+      const NW = 48, NV = 12, P = [];
+      const vert = (w, v) => { const s = sAt(w), k = Math.pow(s, 0.7); return [hwH * s * Math.cos(v), base + hh * k * Math.sin(v), o * w]; };
+      for (let a = 0; a < NW; a++) for (let b = 0; b < NV; b++) {
+        const w0 = hA + ((hB - hA) * a) / NW, w1 = hA + ((hB - hA) * (a + 1)) / NW, v0 = (Math.PI * b) / NV, v1 = (Math.PI * (b + 1)) / NV;
+        const p00 = vert(w0, v0), p01 = vert(w0, v1), p10 = vert(w1, v0), p11 = vert(w1, v1);
+        P.push(...p00, ...p10, ...p11, ...p00, ...p11, ...p01);
+      }
+      const hg = new THREE.BufferGeometry(); hg.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); hg.computeVertexNormals();
+      parts.add('hood', hg, F);
+      const outline = [], rib = [];
+      for (let a = 0; a <= NW; a++) { const w = hA + ((hB - hA) * a) / NW; outline.push(new THREE.Vector3(...vert(w, 0))); rib.push(new THREE.Vector3(...vert(w, Math.PI / 2))); }
+      for (let a = NW; a >= 0; a--) { const w = hA + ((hB - hA) * a) / NW; outline.push(new THREE.Vector3(...vert(w, Math.PI))); }
+      parts.add('accent', new THREE.TubeGeometry(new THREE.CatmullRomCurve3(outline, true), 160, 0.5, 6, true), F);
+      parts.add('accent', new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rib), 80, 0.35, 6, false), F);
+      // name band under the hood's edge, and hangers from the girder up to the hood
+      for (const sx of [-1, 1]) {
+        box('accent', sx * (hwH - 0.6), sx * (hwH - 0.1), base - 2.2, base - 0.2, bA + 2, bB - 2);
+        box('dark', sx * (hwH - 0.7), sx * (hwH - 0.5), base - 1.8, base - 0.6, bA + 3, bA + 16);
+        for (const w of [bA + 4, (bA + bB) / 2, bB - 4]) this._strut(parts, 'steel', F, [sx * (g - 3), gy1, o * w], [sx * (hwH - 0.8), base - 0.2, o * w], 0.45);
+      }
+      // operator's booth on the deck
+      if (opts.joint === 'front') return;
+      box('glassy', hw - 6, hw - 1.5, fy, fy + 3.2, d0 + 2, d0 + 6.5);
+      box('roof', hw - 6.3, hw - 1.2, fy + 3.2, fy + 3.6, d0 + 1.7, d0 + 6.8);
+      return;
+    }
+
+    // 'building': stone ground floor up to the deck, the clad hall above with leaning ends and a
+    // window band, a dark flat roof. The line's end(s) stay open.
+    const top = H + 7, lean = 5;
+    const bw0 = opts.joint === 'front' ? wA : wA + (opts.front ? 4 : 1), bw1 = opts.joint === 'back' ? wB : wB - (opts.back ? 4 : 3);
+    const leanF = opts.joint === 'front' ? 0 : lean + 2, leanB = opts.joint === 'back' ? 0 : (opts.back ? lean : 0) + 2;
+    box('stone', -(hw - 1), hw - 1, low, fy - 0.8, bw0 + 1, bw1 - 1);
+    for (const sx of [-1, 1]) {
+      for (let w = bw0 + 4; w < bw1 - 4; w += 5) box('glassy', sx * (hw - 1.1), sx * (hw - 0.8), 1.2, Math.max(2, fy - 3), w, w + 2.6);
+      // clad side walls: trapezoids, the top edge longer than the bottom (the ends lean outward)
+      this._prism(parts, 'accent', F, o, sx > 0 ? hw - 0.6 : -hw, sx > 0 ? hw : -hw + 0.6,
+        [[bw0, fy - 1], [bw1, fy - 1], [bw1 + leanB, top], [bw0 - leanF, top]]);
+      const g0 = fy + 1.8, g1 = Math.min(top - 2.2, fy + 1.8 + (top - fy) * 0.5);
+      box('glass', sx * hw, sx * (hw + 0.35), g0, g1, bw0 + 1, bw1 - 1);
+      for (let w = bw0 + 1; w <= bw1 - 1; w += 3.2) box('dark', sx * hw, sx * (hw + 0.45), g0, g1, w - 0.15, w + 0.15);
+      box('dark', sx * hw, sx * (hw + 0.45), g0 - 0.25, g0 + 0.05, bw0 + 1, bw1 - 1);
+      box('dark', sx * hw, sx * (hw + 0.45), g1 - 0.05, g1 + 0.25, bw0 + 1, bw1 - 1);
+    }
+    box('roof', -hw - 0.6, hw + 0.6, top, top + 0.9, bw0 - leanF - 0.6, bw1 + leanB + 0.6);
+    box('accent', -hw - 0.7, hw + 0.7, top - 0.5, top, bw0 - leanF - 0.7, bw1 + leanB + 0.7);
+    if (!opts.back) this._prism(parts, 'accent', F, o, -hw, hw, [[bw1, fy - 1], [bw1 + 0.7, fy - 1], [bw1 + 2.7, top], [bw1 + 2, top]]);
+    // entrance: a canopy over a door in the stone floor
+    if (opts.joint === 'back') return;
+    box('dark', hw - 0.9, hw - 0.5, 0, 3.2, bw1 - 9, bw1 - 5);
+    box('roof', hw - 0.5, hw + 3, 3.4, 3.8, bw1 - 10, bw1 - 4);
+  },
+
   // station hall: plinth, columns, glass side walls (+ an end wall at `endWall` = ±1), fascia, gabled roof
+  // ---- aerial tramway stations, after real jig-back stations ----
+  // A concrete podium holds the ticket hall; the cabin hall sits on top, with an island platform
+  // between the two tracks at cabin-floor height (the cabins dock in pits beside it). The track ropes
+  // run in over saddles hung from the roof trusses at the open portal, then down to tension weights
+  // in shafts (valley) or around anchor bollards (mountain). The haul rope turns on a big horizontal
+  // wheel: the tensioned return wheel in the valley, the drive wheel with motor and gearbox on top.
+  // Local frame: z = o * w, where w is the distance outward from the line (w < 0 is towards the line).
+  tramFloor(T) { return T.towerH - 6.7 * CS; },        // cabin floor above the station node
+  _vwheel(parts, key, F, R, x, y, z) {                  // vertical sheave turning along the line
+    const t = new THREE.TorusGeometry(R, 0.35, 6, 28); t.rotateY(Math.PI / 2); t.translate(x, y, z); parts.add(key, t, F);
+    this._box(parts, 'steel', F, 0.9, 0.9, 0.9, x, y, z);
+  },
+  tramStation(parts, F, T, o, valley) {
+    const H = T.towerH, g = T.gauge, fy = this.tramFloor(T), hw = g + 14, cw = 2.1 * CS + 0.4;
+    const box = (key, x0, x1, y0, y1, w0, w1) =>
+      this._box(parts, key, F, Math.abs(x1 - x0), y1 - y0, Math.abs(w1 - w0), (x0 + x1) / 2, (y0 + y1) / 2, o * (w0 + w1) / 2);
+    const W0 = -14, W1 = 43, BAY = 14, R0 = -17, R1 = W1 + 1.5;
+    const roofAt = (w) => H + 9 - 6 * (w - R0) / (R1 - R0);   // roof rises towards the line, like the rope
+    // podium: foundation + ground floor, then the upper floor behind the cabin bays. On a slope the
+    // foundation becomes a concrete substructure reaching down to the lowest ground under the building.
+    let low = -8;
+    const pv = new THREE.Vector3(), node = new THREE.Vector3().setFromMatrixPosition(F);
+    for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) {
+      pv.set(-hw + (2 * hw * i) / 4, 0, o * (W0 + ((W1 - W0) * j) / 4)).applyMatrix4(F);
+      low = Math.min(low, Terrain.height(pv.x, pv.z) - node.y - 3);
+    }
+    box('concrete', -hw, hw, low, fy - 4, W0, W1);
+    box('concrete', -hw, hw, fy - 4, fy, BAY, W1);
+    // island platform between the tracks and the side platforms, yellow edges along the cabin pits
+    const xi = g - cw, xo = g + cw;
+    box('concrete', -xi, xi, fy - 4, fy, W0, BAY);
+    for (const sx of [-1, 1]) {
+      box('concrete', sx * xo, sx * hw, fy - 4, fy, W0, BAY);
+      box('edge', sx * (xi - 0.6), sx * xi, fy, fy + 0.08, W0, BAY);
+      box('edge', sx * xo, sx * (xo + 0.6), fy, fy + 0.08, W0, BAY);
+      box('glass', sx * hw, sx * (hw + 0.4), 1.5, fy - 6, 0, W1 - 3);           // ticket hall windows
+    }
+    box('glass', -hw + 4, hw - 4, 1.5, fy - 6, W1, W1 + 0.4);
+    box('dark', -5, 5, 0, 5, W1, W1 + 0.5);                                   // entrance doors
+    box('accent', -9, 9, fy - 5.6, fy - 4.9, W1, W1 + 6);                     // entrance canopy
+    box('glassy', -xi + 0.4, xi - 0.4, fy, fy + 3.4, 8, 13);                  // operator's cabin on the island
+    box('roof', -xi + 0.2, xi - 0.2, fy + 3.4, fy + 3.8, 7.8, 13.2);
+    // cabin hall: glass curtain walls with mullions, concrete back wall, open portal towards the line
+    for (const sx of [-1, 1]) {
+      for (let w = -5; w < W1; w += 6) {
+        const w2 = Math.min(W1, w + 6);
+        box('glass', sx * (hw - 0.4), sx * hw, fy, roofAt(w2) - 0.4, w, w2);
+        box('steel', sx * (hw - 0.8), sx * (hw + 0.2), fy, roofAt(w), w - 0.35, w + 0.35);
+      }
+      box('concrete', sx * (hw - 2.2), sx * hw, -8, roofAt(R0 + 1), R0 + 0.5, W0 + 2);   // portal pillars
+    }
+    box('concrete', -hw, hw, fy, fy + 2, W1 - 1.2, W1);                    // back wall: glazed above a parapet
+    box('glass', -hw + 1, hw - 1, fy + 2, roofAt(W1) - 0.4, W1 - 0.8, W1 - 0.4);
+    for (let x = -hw + 6; x < hw - 2; x += 6) box('steel', x - 0.35, x + 0.35, fy + 2, roofAt(W1), W1 - 1, W1 - 0.2);
+    const len = R1 - R0, rise = roofAt(R0) - roofAt(R1), th = Math.atan2(rise, len), slant = Math.hypot(len, rise);
+    const ym = (roofAt(R0) + roofAt(R1)) / 2, zm = o * (R0 + R1) / 2;
+    this._box(parts, 'roof', F, 2 * hw + 3, 1.2, slant, 0, ym + 0.6, zm, o * th);
+    this._box(parts, 'accent', F, 2 * hw + 3.6, 1.4, slant + 0.6, 0, ym - 0.4, zm, o * th);
+    box('concrete', -hw, hw, roofAt(R0) - 4.2, roofAt(R0) - 0.4, R0 + 0.5, R0 + 3.5);   // portal lintel
+    box('accent', -hw * 0.55, hw * 0.55, roofAt(R0) - 3.6, roofAt(R0) - 1.2, R0 + 0.1, R0 + 0.5);   // name board
+    // track ropes: in over the saddles, then down to their tension weights or anchors
+    const trusses = [-12, -4, 4];
+    for (const w of trusses) box('steel', -hw, hw, roofAt(w) - 2.4, roofAt(w) - 1.1, w - 0.5, w + 0.5);
+    const ends = [];
+    for (const sx of [-1, 1]) for (const ro of T.ropes || [0]) {
+      const x = sx * g + ro, out = x + Math.sign(ro || sx) * 1.1;
+      const p = (w, y) => [x, y, o * w];
+      this._strut(parts, 'dark', F, p(-11, H - 0.9), p(0, H - 0.9), 1.2);     // saddle shoe under the rope
+      this._strut(parts, 'dark', F, p(0, H - 0.9), p(7, H - 2.3), 1.2);
+      this._strut(parts, 'dark', F, p(7, H - 2.3), p(12, H - 4.5), 1.2);
+      for (const w of trusses) this._strut(parts, 'steel', F, [out, roofAt(w) - 2.4, o * w], [out, H - 0.9, o * w], 0.45);
+      this._strut(parts, 'dark', F, p(0, H), p(12, H - 4.5), 0.35);            // the rope itself
+      ends.push({ x, sx, ro });
+    }
+    if (valley) {
+      // haul rope return wheel on its tension carriage
+      this._bullwheel(parts, F, g, 0, H - 2, o * 20);
+      box('steel', -1.6, 1.6, fy, H - 2.7, 18.4, 21.6);
+      box('dark', -4.5, 4.5, H - 3.6, H - 2.9, 13, 27);
+      // tension-weight shafts, one per track, rising through the roof
+      for (const sx of [-1, 1]) {
+        const x = sx * g, wT = 32, top = roofAt(W1) + 9;
+        // open steel frame inside the hall, a concrete shaft through the roof with the sheave house on top
+        for (const cx of [-3.5, 3.5]) for (const cz of [wT - 4, wT + 7]) this._strut(parts, 'galv', F, [x + cx, fy, o * cz], [x + cx, roofAt(wT), o * cz], 0.8);
+        box('concrete', x - 4.5, x + 4.5, roofAt(wT + 7) - 1, top, wT - 4.5, wT + 7.5);
+        box('roof', x - 5, x + 5, top, top + 0.8, wT - 5, wT + 8);
+        box('steel', x - 1.6, x + 1.6, top + 0.8, top + 7.4, wT - 3.8, wT + 3.8);   // sheave housing
+        box('roof', x - 2, x + 2, top + 7.4, top + 8, wT - 4.2, wT + 4.2);
+        this._vwheel(parts, 'rubber', F, 3, x + 1.8, top + 3.6, o * wT);
+        const wy = H * 0.45;
+        box('concrete', x - 3, x + 3, wy, wy + 7, wT, wT + 6);                // the counterweight
+        for (const e of ends.filter((e) => e.sx === sx)) {
+          this._strut(parts, 'dark', F, [e.x, H - 4.5, o * 12], [e.x, top + 6.6, o * wT], 0.8);
+          this._strut(parts, 'dark', F, [e.x, top + 3.6, o * (wT + 3)], [e.x, wy + 7, o * (wT + 3)], 0.8);
+        }
+      }
+    } else {
+      // drive: bullwheel on its shaft, motor and gearbox below; track ropes wrap round anchor bollards
+      this._bullwheel(parts, F, g, 0, H - 2, o * 20);
+      box('steel', -1.8, 1.8, fy, H - 2.7, 18.2, 21.8);
+      box('dark', -5, 5, fy, fy + 4.5, 26, 34);
+      box('accent', -5.3, 5.3, fy + 4.5, fy + 5.1, 26, 34);
+      box('dark', -1, 1, fy + 4.5, H - 2.7, 20.5, 22);
+      for (const sx of [-1, 1]) {
+        const bx = sx * (g + 3), bw = 36;
+        this._cyl(parts, 'concrete', F, 3.2, 3.6, 6, bx, fy, o * bw, 16);
+        for (let k = 0; k < 3; k++) {
+          const t = new THREE.TorusGeometry(3.35, 0.35, 5, 20); t.rotateX(Math.PI / 2); t.translate(bx, fy + 1.6 + k * 1.4, o * bw); parts.add('dark', t, F);
+        }
+        for (const e of ends.filter((e) => e.sx === sx)) this._strut(parts, 'dark', F, [e.x, H - 4.5, o * 12], [bx + e.ro * 0.8, fy + 5.6, o * (bw - 3)], 0.8);
+      }
+    }
+  },
+
   _hall(parts, F, T, W, L, zc, endWall = 0) {
     const H = T.towerH, big = T.model === 'cabin3s' || T.model === 'funitel';
     const floor = 1.2, eave = H + 5, pitch = big ? 0.22 : 0.3, half = W / 2 + 1.5;
@@ -890,7 +1159,9 @@ const Lifts = {
     return true;
   },
 
-  canHaveStations(T) { return T.kind === 'aerial' && T.station3d !== 'fixed'; },
+  // detachable chairs, gondolas and 3S get one hall with both bullwheels; a tramway line is split
+  // into two tramways, each with its own pair of shuttling cabins, and skiers change cabins there
+  canHaveStations(T) { return (T.kind === 'aerial' && T.station3d !== 'fixed') || T.kind === 'tram'; },
 
   // the sections of one lift line meeting at a node: lower (ends here) and upper (starts here)
   partnerBelow(l) { return l.line ? Net.lifts.find((x) => x !== l && x.line === l.line && x.b === l.a) : null; },
@@ -902,26 +1173,111 @@ const Lifts = {
 
   // Mid-station (straight) or angle station (the line turns): one hall along the bisector of the two
   // sections, the lower section's bullwheel just past the node, the upper section's just before it.
+  // How far an angle/mid-station wing reaches along its own line: `out` from the node towards its
+  // section (the entrance), `past` beyond the node, far enough to hold that section's bullwheel.
+  junctionReach(T) {
+    const g = T.gauge;
+    if (T.kind === 'tram') return { out: 34, past: 16, hw: g + 14 };
+    const ext = Math.max(0, ...(T.ropes || [0]).map(Math.abs)), big = T.model === 'cabin3s' || T.model === 'funitel';
+    return { out: big ? 46 : 38, past: 10 + g + 5, hw: g + ext + 7 };
+  },
+  // footprint of one wing: `lower` = the wing of the section that ends here
+  junctionFootprint(T, at, ux, uz, lower) {
+    const R = this.junctionReach(T), back = lower ? R.out : R.past, ahead = lower ? R.past : R.out, mid = (ahead - back) / 2;
+    return { cx: at.x + ux * mid, cz: at.z + uz * mid, ux, uz, hl: (ahead + back) / 2, hw: R.hw };
+  },
+
+  // Angle / mid-station: two wings, each lined up with its own section, overlapping at the node where
+  // the line turns. Each wing runs from its entrance past the node to its section's bullwheel: the
+  // lower section's on a tensioning carriage, the upper section's with motor and gearbox.
   junction(parts, up, low, node) {
     const T = up.T, H = T.towerH, g = T.gauge, ext = Math.max(0, ...(T.ropes || [0]).map(Math.abs));
     const u1 = low.dir, u2 = up.dir;
-    let bx = u1.ux + u2.ux, bz = u1.uz + u2.uz; const bl = Math.hypot(bx, bz) || 1; bx /= bl; bz /= bl;
-    const bend = this.bendAngle(low, up) * Math.PI / 180;
     const at = (rot) => new THREE.Matrix4().makeRotationY(rot).premultiply(new THREE.Matrix4().makeTranslation(node.x, node.y, node.z));
-    const FB = at(Math.atan2(bx, bz));
-    const W = (g + ext) * 2 + 14 + 26 * Math.sin(bend / 2), L = 56 + 20 * Math.sin(bend / 2);
-    this._hall(parts, FB, T, W, L, 0, 0);
-    this._box(parts, 'wood', FB, W - 4, 0.5, L * 0.5, 0, 1.45, 0);                                   // platform for getting on/off
-    this._box(parts, 'wall', FB, 10, 7, 8, W / 2 + 6, 3.5, 0);                                      // control room
-    this._box(parts, 'accent', FB, 10.6, 0.8, 8.6, W / 2 + 6, 7.2, 0);
     const F1 = at(Math.atan2(u1.ux, u1.uz)), F2 = at(Math.atan2(u2.ux, u2.uz));
-    this._bullwheel(parts, F1, g, 0, H, 10);                                                       // lower loop returns here
-    this._bullwheel(parts, F2, g, 0, H, -10);                                                      // upper loop is driven from here
-    for (const sx of [-1, 1]) {
-      this._box(parts, 'dark', F1, 0.5, 0.5, 14, sx * g, H + 0.6, 2);                              // detach rails into the hall
-      this._box(parts, 'dark', F2, 0.5, 0.5, 14, sx * g, H + 0.6, -2);
+    const R = this.junctionReach(T);
+    // wing of the lower section: z from -out (its entrance) to +past; upper wing: -past to +out
+    const wings = [{ F: F1, z0: -R.out, z1: R.past, entry: -1 }, { F: F2, z0: -R.past, z1: R.out, entry: 1 }];
+    if (T.kind === 'tram') return this._tramJunction(parts, T, wings, node);
+
+    const style = this.stationStyle(up);
+    if (style !== 'classic') {
+      const bend = this.bendAngle(low, up) * Math.PI / 180;
+      this._shell(parts, F1, T, style, 1, -R.out, R.past, { front: true, back: true, joint: 'back', bend });
+      this._shell(parts, F2, T, style, 1, -R.past, R.out, { front: true, back: true, joint: 'front', bend });
+    } else {
+      const W = (g + ext) * 2 + 14;
+      for (const w of wings) {
+        this._hall(parts, w.F, T, W, w.z1 - w.z0, (w.z0 + w.z1) / 2, 0);
+        this._box(parts, 'wood', w.F, W - 4, 0.5, (w.z1 - w.z0) * 0.6, 0, 1.45, w.entry * (R.out * 0.35));
+      }
+      this._box(parts, 'wall', F1, 10, 7, 8, W / 2 + 6, 3.5, -R.out * 0.4);                         // control room
+      this._box(parts, 'accent', F1, 10.6, 0.8, 8.6, W / 2 + 6, 7.2, -R.out * 0.4);
     }
-    this._box(parts, 'dark', FB, 3, 2.2, 4, 0, H + 1.8, -L / 2 + 6);                              // drive motor for the upper loop
+    // the equipment, in each wing's own frame
+    this._bullwheel(parts, F1, g, 0, H, 10);                                                       // lower loop turns back here
+    this._bullwheel(parts, F2, g, 0, H, -10);                                                      // upper loop is driven from here
+    for (const [F, z0, z1] of [[F1, -R.out + 4, 10], [F2, -10, R.out - 4]]) {
+      for (const sx of [-1, 1]) {
+        this._box(parts, 'dark', F, 0.5, 0.5, z1 - z0, sx * g, H + 0.6, (z0 + z1) / 2);             // station rail
+        for (let z = z0 + 1; z < z1; z += 2.4) this._cyl(parts, 'rubber', F, 0.45, 0.45, 0.35, sx * (g - 0.9), H - 0.2, z, 8);   // tyre conveyor
+        this._box(parts, 'steel', F, 0.4, 0.4, z1 - z0, sx * (g - 0.9), H - 0.6, (z0 + z1) / 2);
+      }
+    }
+    for (const sx of [-1, 1]) this._box(parts, 'dark', F1, 0.6, 0.6, 16, sx * 2.2, H + 1.6, 10);      // tensioning carriage rails
+    this._box(parts, 'steel', F1, 6, 1.2, 4, 0, H + 1.8, 10);
+    this._box(parts, 'dark', F2, 4, 3, 6, 0, H + 2.8, -10);                                         // drive motor + gearbox
+    this._box(parts, 'accent', F2, 4.3, 0.5, 6.3, 0, H + 4.5, -10);
+    this._box(parts, 'dark', F2, 1.4, 2, 1.4, 0, H + 0.6, -10);
+  },
+
+  // tram mid-station as two wings: podium, platforms at cabin floor, glass hall; a portal on each
+  // wing's entrance; each section's track ropes over saddles onto bollards near the node
+  _tramJunction(parts, T, wings, node) {
+    const H = T.towerH, g = T.gauge, fy = this.tramFloor(T), hw = g + 14, cw = 2.1 * CS + 0.4, top = H + 7;
+    const xi = g - cw, xo = g + cw;
+    wings.forEach((wg, n) => {
+      const Fm = wg.F, box = (key, x0, x1, y0, y1, z0, z1) =>
+        this._box(parts, key, Fm, Math.abs(x1 - x0), y1 - y0, Math.abs(z1 - z0), (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+      const z0 = wg.z0, z1 = wg.z1, ze = wg.entry > 0 ? z1 : z0;            // ze: the entrance end
+      let low = -8;
+      const pv = new THREE.Vector3();
+      for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) {
+        pv.set(-hw + (2 * hw * i) / 4, 0, z0 + ((z1 - z0) * j) / 4).applyMatrix4(Fm);
+        low = Math.min(low, Terrain.height(pv.x, pv.z) - node.y - 3);
+      }
+      box('concrete', -hw, hw, low, fy - 4, z0, z1);
+      box('concrete', -xi, xi, fy - 4, fy, z0, z1);
+      for (const sx of [-1, 1]) {
+        box('concrete', sx * xo, sx * hw, fy - 4, fy, z0, z1);
+        box('edge', sx * (xi - 0.6), sx * xi, fy, fy + 0.08, z0, z1);
+        box('edge', sx * xo, sx * (xo + 0.6), fy, fy + 0.08, z0, z1);
+        box('glass', sx * hw, sx * (hw + 0.4), 1.5, fy - 6, z0 + 4, z1 - 4);
+        for (let z = z0 + 5; z <= z1 - 3; z += 6) {
+          box('glass', sx * (hw - 0.4), sx * hw, fy, top - 0.4, z - 3, z + 3);
+          box('steel', sx * (hw - 0.8), sx * (hw + 0.2), fy, top, z - 0.35, z + 0.35);
+        }
+        box('concrete', sx * (hw - 2.2), sx * hw, low, top, ze - 1.5, ze + 1.5);              // portal pillars
+      }
+      box('roof', -hw - 1.5, hw + 1.5, top + 0.6, top + 1.8, z0 - (ze === z0 ? 2 : 0), z1 + (ze === z1 ? 2 : 0));
+      box('accent', -hw - 1.8, hw + 1.8, top - 0.8, top + 0.6, z0 - (ze === z0 ? 2.3 : 0), z1 + (ze === z1 ? 2.3 : 0));
+      box('concrete', -hw, hw, top - 4, top - 0.4, ze - 1.5, ze + 1.5);
+      box('accent', -hw * 0.55, hw * 0.55, top - 3.5, top - 1.2, ze + wg.entry * 1.5, ze + wg.entry * 1.9);
+      if (n === 0) { box('glassy', -xi + 0.4, xi - 0.4, fy, fy + 3.4, -3, 3); box('roof', -xi + 0.2, xi - 0.2, fy + 3.4, fy + 3.8, -3.2, 3.2); }
+      // saddles at the entrance, then the ropes down to bollards near the node
+      const dirz = wg.entry;
+      for (const sx of [-1, 1]) for (const ro of T.ropes || [0]) {
+        const x = sx * g + ro, bxx = sx * (hw - 5);
+        this._strut(parts, 'dark', Fm, [x, H - 0.9, dirz * 14], [x, H - 0.9, dirz * 4], 1.2);
+        this._strut(parts, 'dark', Fm, [x, H - 0.9, dirz * 4], [bxx, fy + 5.6, dirz * 6], 0.8);
+        this._strut(parts, 'steel', Fm, [x + Math.sign(ro || sx) * 1.1, top - 1, dirz * 10], [x + Math.sign(ro || sx) * 1.1, H - 0.9, dirz * 10], 0.45);
+      }
+      for (const sx of [-1, 1]) {
+        const bxx = sx * (hw - 5);
+        this._cyl(parts, 'concrete', Fm, 2.6, 3, 5.5, bxx, fy, dirz * 6, 14);
+        for (let k = 0; k < 3; k++) { const t = new THREE.TorusGeometry(2.75, 0.3, 5, 18); t.rotateX(Math.PI / 2); t.translate(bxx, fy + 1.4 + k * 1.3, dirz * 6); parts.add('dark', t, Fm); }
+      }
+    });
   },
 
   build(l) {
