@@ -1106,7 +1106,7 @@ const Net = {
 };
 
 // ---------- simulation ----------
-const TMP = {}, TMP2 = {};
+const TMP = {}, TMP2 = {}, QP = {};
 const Game = {
   init(map, scene) {
     initAssets();
@@ -1175,6 +1175,47 @@ const Game = {
     for (const s of this.skiers) this.stepSkier(s, dt);
     if (this._gone) this.skiers = this.skiers.filter((s) => s.state !== 'gone');
     if (this.time >= DAY_END) this.endDay();
+  },
+
+  // Where guests wait for a lift: a grid 6 wide whose rows grow outward, standing outside the
+  // buildings. A few spots around the station are tried (behind it or beside it; beside the hall at a
+  // mid-station) and the one clear of other buildings is kept, until something is built or moved.
+  queueLayout(l, down) {
+    const c = l._ql || (l._ql = {});
+    if (c.v !== Net.version) { c.v = Net.version; c.up = c.down = null; }
+    const key = down ? 'down' : 'up';
+    if (c[key]) return c[key];
+    const { ux, uz, px, pz } = l.dir, n = down ? l.b : l.a;
+    const lay = (ox, oz, rx, rz, cx, cz) => ({ ox: n.x + ox, oz: n.z + oz, rx, rz, cx, cz });
+    const cand = [];
+    if (down) {                                        // beside the top station, a little down the line
+      const w = Lifts.queueClearance(l, false) + 4;
+      for (const sd of [-1, 1]) cand.push(lay(-ux * 14 + sd * px * w, -uz * 14 + sd * pz * w, -ux * 5, -uz * 5, sd * px * 2.5, sd * pz * 2.5));
+    } else if (Lifts.partnerBelow(l)) {                // mid / angle station: alongside its own wing of the hall
+      const w = Lifts.queueClearance(l, true) + 5;
+      for (const sd of [1, -1]) cand.push(lay(sd * px * w + ux * 4, sd * pz * w + uz * 4, sd * px * 4, sd * pz * 4, ux * 4, uz * 4));
+    } else {                                           // terminal: behind the station, else beside it
+      const back = Lifts.queueClearance(l, true), w = Lifts.stationFootprint(l.T, l.a, ux, uz, true).hw + 5;
+      cand.push(lay(-ux * back - px * 15, -uz * back - pz * 15, -ux * 7, -uz * 7, px * 6, pz * 6));
+      for (const sd of [1, -1]) cand.push(lay(sd * px * w - ux * 8, sd * pz * w - uz * 8, sd * px * 4, sd * pz * 4, -ux * 4, -uz * 4));
+    }
+    const fps = Net.footprints(), p = {};
+    const blocked = (x, z) => !Terrain.inside(x, z) || fps.some((F) => {
+      const dx = x - F.cx, dz = z - F.cz;
+      return Math.abs(dx * F.ux + dz * F.uz) < F.hl + 1 && Math.abs(-dx * F.uz + dz * F.ux) < F.hw + 1;
+    });
+    let best = cand[0], score = Infinity;
+    for (const q of cand) {
+      let bad = 0;
+      for (let k = 0; k < 60 && bad < score; k++) { this.queueSpot(q, k, p); if (blocked(p.x, p.z)) bad += k < 18 ? 3 : 1; }
+      if (bad < score) { score = bad; best = q; }
+    }
+    return (c[key] = best);
+  },
+  queueSpot(q, k, out) {
+    const r = Math.floor(k / 6), c = k % 6;
+    out.x = q.ox + q.rx * r + q.cx * c; out.z = q.oz + q.rz * r + q.cz * c;
+    return out;
   },
 
   stepLift(l, dt) {
@@ -1700,17 +1741,14 @@ const Game = {
           } else putSkier(p.x + px * (k ? 1.5 : -1.5), p.y + 5.5, p.z + pz * (k ? 1.5 : -1.5), 0.8, s.skill);
         });
       }
-      (l.downQueue || []).forEach((s, k) => {                      // waiting at the top to ride down
-        if (k >= 60) return;
-        const row = Math.floor(k / 6), col = (k % 6) - 2.5;
-        const x = l.b.x - ux * (14 + row * 5) - px * (T.gauge + 14 + col * 2.5), z = l.b.z - uz * (14 + row * 5) - pz * (T.gauge + 14 + col * 2.5);
-        putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
-      });
-      l.queue.forEach((s, k) => {
-        const row = Math.floor(k / 6), col = (k % 6) - 2.5;
-        const x = l.a.x - ux * (34 + row * 7) + px * col * 6, z = l.a.z - uz * (34 + row * 7) + pz * col * 6;
-        putSkier(x, Terrain.height(x, z) + 5.5, z, 1, s.skill);
-      });
+      if (l.downQueue && l.downQueue.length) {                    // waiting at the top to ride down
+        const q = this.queueLayout(l, true);
+        l.downQueue.forEach((s, k) => { if (k < 60) { const p = this.queueSpot(q, k, QP); putSkier(p.x, Terrain.height(p.x, p.z) + 5.5, p.z, 1, s.skill); } });
+      }
+      if (l.queue.length) {
+        const q = this.queueLayout(l, false);
+        l.queue.forEach((s, k) => { const p = this.queueSpot(q, k, QP); putSkier(p.x, Terrain.height(p.x, p.z) + 5.5, p.z, 1, s.skill); });
+      }
     }
     for (const k in cm) { cm[k].count = cnt[k]; cm[k].instanceMatrix.needsUpdate = true; if (cm[k].instanceColor) cm[k].instanceColor.needsUpdate = true; }
     sm.count = si;

@@ -1149,6 +1149,18 @@ const Lifts = {
     const mid = o * (ahead - back) / 2;                       // centre offset along the line
     return { cx: at.x + ux * mid, cz: at.z + uz * mid, ux, uz, hl: (ahead + back) / 2, hw };
   },
+  // How far from the node a queue must stand to be outside the station building. bottom: the
+  // boarding queue (behind a terminal, or the half width of a mid-station hall); otherwise the
+  // half width at the top, for the queue to ride down.
+  queueClearance(l, bottom) {
+    const T = l.T, { ux, uz } = l.dir;
+    const shared = bottom ? this.partnerBelow(l) : this.partnerAbove(l);
+    if (shared) return this.junctionReach(T).hw;
+    const fp = this.stationFootprint(T, bottom ? l.a : l.b, ux, uz, bottom);
+    if (!bottom) return fp.hw;
+    const behind = fp.hl - ((fp.cx - l.a.x) * ux + (fp.cz - l.a.z) * uz);
+    return Math.max(34, behind + 7);
+  },
   lodgeFootprint(n) { return { cx: n.x, cz: n.z, ux: 1, uz: 0, hl: 24, hw: 16 }; },
   // separating-axis test for two oriented rectangles (with a little breathing room)
   overlaps(A, B, gap = 3) {
