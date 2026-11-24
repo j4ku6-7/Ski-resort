@@ -116,7 +116,10 @@ const App = {
         off: 'Saves stay in this browser. To continue on another computer with this ID, start the save server with <code>node server.js</code> and open the address it prints (or enter it below).',
         checking: 'Checking the save server…',
         saving: 'Saving to the server…',
-        ok: `Synced with the save server${at ? ' at ' + at : ''}. On another computer, open the same server and enter this ID.`,
+        ok: Cloud.count
+          ? `Synced with the save server${Cloud.found ? ' on this computer (' + srv.replace(/^https?:\/\//, '') + ')' : ''}${at ? ' at ' + at : ''}: ${Cloud.count} resort${Cloud.count > 1 ? 's' : ''} saved under this ID. On another computer, open the server's address and enter this ID.`
+          : `Connected to the save server, but nothing is saved under this ID yet. Start a resort, or import a save file.` +
+            (/^https?:$/.test(location.protocol) ? ' Played before by opening <code>index.html</code> as a file? Open it that way once while the server runs: it uploads that progress and shows the ID it\'s under, which you can enter here.' : ''),
         offline: `Can't reach the save server${srv ? ' at ' + srv : ''}. Progress still saves in this browser and is uploaded once the server is back.`,
         conflict: 'Some resorts were played on two computers. Pick which progress to keep on their cards.',
       }[Cloud.state] || '';
@@ -137,7 +140,8 @@ const App = {
       let doc;
       try { doc = await Cloud.fetchPlayer(other); } catch { box.innerHTML = `<p class="danger">Can't reach the save server at ${Cloud.server()}.</p>`; return; }
       const list = doc ? Object.entries(doc.resorts).filter(([k]) => window.SKI_MAPS[k]) : [];
-      if (!list.length) { box.innerHTML = `<p class="danger">No progress is saved under ${Cloud.pretty(other)} on this server. Check the ID, and that both computers use the same save server.</p>`; return; }
+      if (!doc) { box.innerHTML = `<p class="danger">This server doesn't know ${Cloud.pretty(other)}. Check the ID, and that both computers use the same save server (${Cloud.server().replace(/^https?:\/\//, '')}).</p>`; return; }
+      if (!list.length) { box.innerHTML = `<p class="danger">${Cloud.pretty(other)} exists, but nothing is saved under it yet. On the computer that has the progress, open the game's menu while it's connected to this server: that uploads it. Then try again.</p>`; return; }
       const here = Object.keys(window.SKI_MAPS).filter((k) => Save.read(k));
       const replaced = here.filter((k) => doc.resorts[k]);
       box.innerHTML = `<p><b>${Cloud.pretty(other)}</b> has:</p>` +

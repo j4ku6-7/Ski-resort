@@ -26,7 +26,7 @@ With the save server running, progress is also stored on the server under your *
 
 From then on both computers stay in sync on their own: the game uploads while you play (at most every 15 seconds) and downloads the newest progress when the menu opens. If you play the same resort on both computers without them syncing in between (for example while the server was off), the resort's card shows both versions and you pick which to keep. If the server can't be reached, the game keeps saving in the browser and uploads once the server is back.
 
-If you open `index.html` as a file instead, enter the server's address in the menu to sync with it.
+If you open `index.html` as a file instead, the game finds a server running on the same computer by itself; for a server on another computer, enter its address in the menu. The browser keeps saves separately for the file and for each server address, so each has its own player ID: progress made in the file version uploads under the ID that the file version's menu shows.
 
 Anyone who knows a player ID can load and overwrite its progress, so share it only with yourself. To reach the server from outside your home network, run `server.js` on any machine that runs Node and is reachable from both computers.
 

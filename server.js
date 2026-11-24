@@ -45,6 +45,7 @@ function readBody(req) {
 }
 
 // GET    /api/players/ID              -> { id, resorts: { key: { save, best, savedAt, updatedAt } } }
+// POST   /api/players/ID              -> registers the ID (no saves yet)
 // PUT    /api/players/ID/RESORT       body { base, force, save, best, savedAt }  -> { updatedAt } or 409 { updatedAt }
 //        (POST works the same, so the game can send it as a simple request that survives closing the tab)
 // DELETE /api/players/ID/RESORT?base=&force=1  -> { updatedAt: null } or 409
@@ -57,6 +58,10 @@ async function api(req, res, parts, url) {
   if (req.method === 'GET' && resort === undefined) {
     if (!doc) return send(res, 404, { error: 'no such player' });
     return send(res, 200, doc);
+  }
+  if (resort === undefined && req.method === 'POST') {          // register an ID, so lookups can tell "empty" from "unknown"
+    if (!doc) store(id, { id, created: new Date().toISOString(), resorts: {} });
+    return send(res, 200, { id, created: !doc });
   }
   if (resort === undefined) return send(res, 405, { error: 'method not allowed' });
   const cur = doc && doc.resorts[resort];

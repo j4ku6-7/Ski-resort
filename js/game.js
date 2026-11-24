@@ -1779,7 +1779,21 @@ const Cloud = {
     let s = null;
     try { s = localStorage.getItem('skiresort.server'); } catch { /* ignore */ }
     if (s) return s.replace(/\/+$/, '');
-    return /^https?:$/.test(location.protocol) ? location.origin : null;   // the game was opened from server.js
+    if (/^https?:$/.test(location.protocol)) return location.origin;      // the game was opened from server.js
+    return this.found;                                                    // opened as a file: a server found on this computer
+  },
+  found: null, count: 0, DETECT_PORTS: [8642, 8643, 8644],
+  // opened as index.html: look for server.js running on this computer
+  async detect() {
+    if (this.server()) return;
+    for (const port of this.DETECT_PORTS) {
+      try {
+        const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 1200);
+        const r = await fetch(`http://localhost:${port}/api/ping`, { signal: ctl.signal, cache: 'no-store' });
+        clearTimeout(t);
+        if (r.ok && (await r.json()).ok) { this.found = `http://localhost:${port}`; return; }
+      } catch { /* not there */ }
+    }
   },
   setServer(url) {
     try { if (url) localStorage.setItem('skiresort.server', url); else localStorage.removeItem('skiresort.server'); } catch { /* ignore */ }
@@ -1832,10 +1846,14 @@ const Cloud = {
   // menu: bring this browser and the cloud up to date. Returns { conflicts: { resort: cloudEntry } }
   async sync() {
     const out = { conflicts: {} };
+    if (!this.server()) { this.set('checking'); await this.detect(); }
     if (!this.server()) { this.set('off'); return out; }
     this.set('checking');
     let doc;
-    try { doc = await this.fetchPlayer(this.id()); } catch { this.set('offline'); return out; }
+    try {
+      doc = await this.fetchPlayer(this.id());
+      if (!doc) await fetch(this.url(this.id()), { method: 'POST' });     // register the ID right away
+    } catch { this.set('offline'); return out; }
     if (this.playing) return out;            // a game was started meanwhile: don't swap saves under it
     const resorts = (doc && doc.resorts) || {};
     for (const k of Object.keys(window.SKI_MAPS)) {
@@ -1844,10 +1862,13 @@ const Cloud = {
         if (!dirty) this.take(k, c);           // saved on another computer, nothing new here: use it
         else out.conflicts[k] = c;             // both changed since they last agreed: the player chooses
       } else if (local && (dirty || !c)) {
-        if (!c && m.syncedAt) { m.syncedAt = null; m.force = true; Save.setMeta(k, m); }   // gone from the cloud: upload it again
+        if (!c) {                              // the cloud doesn't have it (an older save, or removed there): upload it
+          const m2 = Save.changed(k); if (m.syncedAt) { m2.syncedAt = null; m2.force = true; } Save.setMeta(k, m2);
+        }
         this.queue(k, true);                   // progress made here (maybe offline) that the cloud lacks
       }
     }
+    this.count = Object.keys(window.SKI_MAPS).filter((k) => resorts[k] || Save.read(k)).length;
     this.lastSync = Date.now();
     this.set(Object.keys(out.conflicts).length ? 'conflict' : 'ok');
     return out;
