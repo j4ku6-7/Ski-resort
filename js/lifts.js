@@ -481,7 +481,7 @@ const Lifts = {
       glass: lam(0x9fd0ff, { transparent: true, opacity: 0.35, depthWrite: false }),
       glassy: lam(0x9fc7ff, { transparent: true, opacity: 0.55 }),
       cable: new THREE.LineBasicMaterial({ color: 0x15171a }),
-      ropeMesh: lam(0x1d2024),
+      ropeMesh: lam(0x1d2024), trackRope: lam(0x6b5444), haulRope: lam(0x7d838b),
       station: {},
     };
     for (const k in LIFT_TYPES) this.M.station[k] = lam(LIFT_TYPES[k].station);
@@ -702,6 +702,7 @@ const Lifts = {
 
   _battery(parts, FL, l, t) {
     const T = l.T, surface = T.kind === 'surface';
+    if (T.saddles) { this._saddles3s(parts, FL, T, t); return; }
     const sets = t.mode === 'both' ? ['support', 'hold'] : [t.mode];
     t.bal = {};
     for (const set of sets) {
@@ -738,16 +739,36 @@ const Lifts = {
     }
   },
 
-  // 3S track rope saddle: a long curved shoe the rope rests in, following the bend, on a girder
-  _saddle(parts, FL, t, x) {
-    const s0 = t.s0 - 2.5, s1 = t.s1 + 2.5, n = Math.max(3, Math.ceil((s1 - s0) / 2));
+  // 3S pylon head, after a photo of one: on each track the two track ropes rest on top of tall box
+  // girders that follow the bend; between them, lower down, the haul rope runs over a line of sheaves,
+  // each on a white cross bracket tying the girders together, with a yellow spring unit.
+  _saddles3s(parts, FL, T, t) {
+    const s0 = t.s0 - 3, s1 = t.s1 + 3, n = Math.max(4, Math.ceil((s1 - s0) / 1.5)), drop = -this.ropeDY(T, T.haulRope);
     const at = (k) => { const s = s0 + ((s1 - s0) * k) / n; return [s, t.yAt(s)]; };
-    for (let k = 0; k < n; k++) {
-      const [sa, ya] = at(k), [sb, yb] = at(k + 1);
-      this._strut(parts, 'dark', FL, [x, ya - 0.3, sa], [x, yb - 0.3, sb], 0.55);          // the groove
-      this._strut(parts, 'steel', FL, [x, ya - 1.0, sa], [x, yb - 1.0, sb], 0.75);         // girder
+    const half = Math.max(...T.ropes.map(Math.abs)), rw = 0.42;           // track ropes at ±half, sheave radius
+    t.bal = { support: [[(t.s0 + t.s1) / 2, t.yAt((t.s0 + t.s1) / 2) - 1.55]] };   // where the pylon's posts meet the girders
+    for (const sgn of [1, -1]) {
+      const xc = sgn * T.gauge;
+      for (const sx of [-1, 1]) {
+        const x = xc + sx * half;
+        for (let k = 0; k < n; k++) {
+          const [sa, ya] = at(k), [sb, yb] = at(k + 1);
+          this._plank(parts, 'frame', FL, [x, ya - 0.22, sa], [x, yb - 0.22, sb], 0.42, 0.14);              // grooved top the rope lies in
+          this._plank(parts, 'galv', FL, [x + sx * 0.08, ya - 0.9, sa], [x + sx * 0.08, yb - 0.9, sb], 0.3, 1.25);   // box girder
+          this._plank(parts, 'galv', FL, [x + sx * 0.2, ya - 1.5, sa], [x + sx * 0.2, yb - 1.5, sb], 0.7, 0.12);     // bottom flange
+        }
+      }
+      // cross brackets with the haul rope sheaves, every 1.5 m or so
+      for (let k = 1; k < n; k++) {
+        const [sk, yk] = at(k), yh = yk - drop;
+        this._strut(parts, 'frame', FL, [xc - half, yk - 1.5, sk], [xc + half, yk - 1.5, sk], 0.22);         // tie between the girders
+        for (const sx of [-1, 1]) this._strut(parts, 'frame', FL, [xc + sx * 0.35, yk - 1.5, sk], [xc + sx * (half - 0.2), yk - 0.7, sk], 0.16);   // V arms
+        const g = new THREE.CylinderGeometry(rw, rw, 0.26, 16); g.rotateZ(Math.PI / 2); g.translate(xc, yh - rw, sk); parts.add('rubber', g, FL);
+        const hub = new THREE.CylinderGeometry(rw * 0.4, rw * 0.4, 0.4, 8); hub.rotateZ(Math.PI / 2); hub.translate(xc, yh - rw, sk); parts.add('steel', hub, FL);
+        this._strut(parts, 'steel', FL, [xc + 0.25, yh - rw, sk], [xc + 0.25, yk - 1.45, sk], 0.14);               // sheave fork
+        this._box(parts, 'edge', FL, 0.22, 0.3, 0.26, xc + 0.42, yh - rw - 0.25, sk);                             // yellow spring unit
+      }
     }
-    for (let k = 0; k <= n; k += 2) { const [sa, ya] = at(k); this._strut(parts, 'steel', FL, [x, ya - 0.3, sa], [x, ya - 1.0, sa], 0.3); }
   },
 
   // crossarm height (absolute) for profile point i
@@ -775,10 +796,10 @@ const Lifts = {
         const bx = sgn * (T.gauge + o) + sgn * 0.55, dy = this.ropeDY(T, k);
         if (this.isSaddle(T, k)) {                       // saddle girder on posts from the crossarm
           const x = sgn * (T.gauge + o);
-          for (const ds of [-2.5, 0, 2.5]) this._strut(parts, 'steel', FL, [x, armAbs, p.s + ds], [x, t.yAt(p.s + ds) - 1.0, p.s + ds], 0.7);
+          for (const ds of [-2.5, 0, 2.5]) this._strut(parts, 'galv', FL, [x, armAbs, p.s + ds], [x, t.yAt(p.s + ds) - 1.55, p.s + ds], 0.6);
           continue;
         }
-        if (dy) { this._strut(parts, 'steel', FL, [bx, armAbs, p.s], [bx, bal[1] + dy, bal[0]], 0.5); continue; }
+        if (T.saddles) continue;                         // the haul rope sheaves hang between the girders
         if (set === 'hold' && t.mode === 'both') {                    // top set of a "both" train: yoke over the rope
           this._strut(parts, 'steel', FL, [bx, armAbs, p.s], [bx + sgn * 1, armAbs, p.s], 0.6);
           this._strut(parts, 'steel', FL, [bx + sgn * 1, armAbs, p.s], [bx + sgn * 1, bal[1], bal[0]], 0.5);
@@ -1433,9 +1454,9 @@ const Lifts = {
       g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(line), M.cable));
       const path = new THREE.CurvePath();
       for (let k = 0; k < line.length - 1; k++) if (line[k].distanceToSquared(line[k + 1]) > 0.01) path.add(new THREE.LineCurve3(line[k], line[k + 1]));
-      if (path.curves.length) ropeParts.add('rope', new THREE.TubeGeometry(path, path.curves.length, 0.15, 5, false));
+      if (path.curves.length) ropeParts.add(this.isSaddle(T, k) ? 'track' : T.saddles ? 'haul' : 'rope', new THREE.TubeGeometry(path, path.curves.length, this.isSaddle(T, k) ? 0.2 : 0.15, 5, false));
     });
-    ropeParts.build(g, (k) => M.ropeMesh);
+    ropeParts.build(g, (k) => (k === 'track' ? M.trackRope : k === 'haul' ? M.haulRope : M.ropeMesh));
     const up = this.ropeLine(P, a, 1, T.gauge), down = this.ropeLine(P, a, -1, T.gauge).reverse();
     if (T.kind === 'surface') {
       // riders are dragged along the snow under the uphill rope
