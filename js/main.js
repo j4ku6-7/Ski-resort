@@ -1214,6 +1214,7 @@ const App = {
       $('#pp-wheels').value = sel.wheels || 0;
       $('#pp-wheels-v').textContent = sel.wheels ? `${sel.wheels} wheels` : `auto (${tr ? tr.n : '?'})`;
       $('#pp-mode').value = sel.mode || 'auto';
+      $('#pp-mode').closest('label').hidden = !!this.edit.l.T.saddles;     // 3S: saddles under the ropes, nothing else
       if (tr) {
         const over = tr.perWheel > MAX_BEND;
         $('#pp-bend').innerHTML = `Rope bends <b>${tr.deg.toFixed(1)}°</b> here, ${tr.press ? 'pressing down' : 'lifting up'} · <b class="${over ? 'neg' : ''}">${tr.perWheel.toFixed(1)}° per wheel</b> (max ${MAX_BEND}°) · ${SHEAVE_MODES[tr.mode].toLowerCase()} wheels`;

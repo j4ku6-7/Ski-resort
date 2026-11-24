@@ -50,7 +50,7 @@ To move a save without the server:
    | 8-person gondola | 2 880/h | 6 m/s | enclosed, up to 6 km |
    | 10-person gondola | 3 600/h | 6 m/s | panoramic cabins |
    | Funitel | 4 800/h | 7 m/s | wide cabins on twin ropes, very stable |
-   | 3S tricable gondola | 4 800/h | 7.5 m/s | spans of several km, only a few huge pylons |
+   | 3S tricable gondola | 4 800/h | 7.5 m/s | spans of several km, only a few huge pylons (see below) |
    | Aerial tramway | about 400/h | 10 m/s | two shuttling cabins, very few towers, spans cliffs |
 
    **Pylons:** tick *Place pylons myself* in the lift picker, or press *Edit pylons* in a lift's panel. Click the lift line to add a pylon, drag pylons along the line, use `+`/`−` to change their height (Shift = 5 m steps) and `Del` to remove one. Taller pylons cost more. The rope is coloured by the safety check: green is fine, orange is tight, red means carriers hit the snow, and yellow means chairs hang too high above the ground to evacuate. Spans that are too long are flagged as well. A lift that fails inspection stays closed. Press Done to pay for the changes (removed pylons are refunded at 50%), or Cancel to revert. Placing pylons yourself is often cheaper than the automatic layout. The editor flies the camera to a side view of the lift and opens a **side-view profile** along the bottom of the screen, with the vertical scale stretched so every pylon is visible. Click it to add a pylon at that height, drag a pylon left/right to move it or up/down to change its height, and right-click to remove it.
@@ -64,6 +64,8 @@ To move a save without the server:
    **No overlapping buildings:** if a new station would overlap a lodge or another station, it is placed on the nearest free ground beside it (sideways first) and joined to the original spot by a footpath. Skiers walk the footpath freely, so lifts and runs at either end are all reachable.
 
    **Moving stations:** *⇄ Move bottom/top station* in the lift panel lets you place a station yourself, within 220 m of its lodge or runs. The preview is green if the spot is fine, orange if the new line crosses another lift and red if it's blocked; click the original spot to put it back. Moving is free unless the lift gets longer, in which case you pay only for the extra length. Automatic placement avoids crossing other lift lines when it can.
+
+   **3S rope layout:** each direction has two track ropes that the cabin's 8-wheel carriage rolls on, with the haul rope centred between them and a little lower, held by the grip. On the pylons the track ropes lie in curved saddles and only the haul rope runs on sheaves; the hanger leaves the carriage on the outer side to pass the pylon. Nothing can hold a 3S rope down, so every 3S pylon must carry the ropes from below: a pylon that sits lower than the line between its neighbours fails inspection, and the fix is to make it taller.
 
    **Mid-stations and angle stations** (detachable chairs, gondolas, 3S and aerial tramways):
    - *Add a station on this line* in the lift panel, then click the line, places an intermediate station where skiers can get on and off, or stay on and ride through.
