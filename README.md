@@ -101,8 +101,8 @@ To move a save without the server:
    - Experts ski all runs.
    - Freeriders (about 1 in 12) ride the lifts and then ski their own off-piste lines down the real mountain, up to 45°, to a lift bottom or a lodge. They pick the biggest lines from each lift top, and they'll also ski red and black runs. A lift whose top has no run but does have a freeride line down still gets freeriders.
 
-   Better skiers know the mountain: intermediates, and even more so experts and freeriders, go for the lifts with short queues, while beginners stick with the lift in front of them. So a second lift next to a busy one mainly draws away the good skiers.
-4. **Food:** guests want a coffee mid-morning, lunch around midday, and a coffee in the afternoon. When it's time, they take the quickest way to a place to eat, counting skiing, lift queues and footpaths, and pay there. The base lodges have 300 seats. With the **🍽 Restaurant** tool (key `6`) you can build:
+   Guests spread out. They choose the lift with the shorter queue, and a piste by how crowded it is and how long the queue is at the lift it leads to, so a busy lift or a packed funnel sends them a different way when there is one. On arrival they pick the base area with the shortest queues. Everyone does this, but better skiers care most: beginners put up with a queue, while experts and freeriders go out of their way to avoid one. A piste feels crowded above about 6 skiers per 100 m.
+4. **Food:** guests want a coffee mid-morning, lunch around midday, and a coffee in the afternoon. When it's time, they take the quickest way to a place to eat, counting skiing, lift queues, footpaths and the wait for a table, and pay there. If a place is full, they go on to another one when that's quicker than waiting, also after waiting there a few minutes. The base lodges have 300 seats. With the **🍽 Restaurant** tool (key `6`) you can build:
    - a **Mountain hut** (90 seats);
    - a **Panorama restaurant** (260 seats).
 

@@ -1171,6 +1171,13 @@ const Game = {
       while (this.arrivalAcc >= 1) { this.arrivalAcc -= 1; if (this.skiers.length < MAX_SKIERS) this.spawn(); }
     }
     for (const l of Net.lifts) this.stepLift(l, dt);
+    // how busy each piste and restaurant is right now: guests choose the quieter ones
+    for (const r of Net.runs) r.load = 0;
+    for (const n of Net.nodes) n.waiting = 0;
+    for (const s of this.skiers) {
+      if (s.state === 'ski') s.edge.load++;
+      else if (s.state === 'eat' && !s.seated && s.place) s.place.waiting++;
+    }
     this._gone = false;
     for (const s of this.skiers) this.stepSkier(s, dt);
     if (this._gone) this.skiers = this.skiers.filter((s) => s.state !== 'gone');
@@ -1273,7 +1280,10 @@ const Game = {
     const bases = Net.nodes.filter((n) => n.base);
     const good = bases.filter((b) => this.canStart(b, skill));
     const pool = good.length ? good : bases;
-    const node = pool[(Math.random() * pool.length) | 0];
+    // guests check the queues before they set off: a base area with short queues draws more of them
+    const ws = pool.map((b) => this.dodge(this.baseHassle(b, skill), skill) + 0.05);
+    let t = Math.random() * ws.reduce((x, y) => x + y, 0), node = pool[0];
+    for (let i = 0; i < pool.length; i++) { t -= ws[i]; if (t <= 0) { node = pool[i]; break; } }
     this.skiers.push({
       skill, node, happy: 60 + Math.random() * 10, want: 4 + ((Math.random() * 7) | 0), done: 0,
       state: 'atNode', edge: null, d: 0, wait: 0, pace: 0.85 + Math.random() * 0.3, wig: Math.random() * 6.28, last: null,
@@ -1298,6 +1308,50 @@ const Game = {
   },
   seats(n) { return n.base ? LODGE_SEATS : n.food ? FOOD_TYPES[n.food.type].seats : 0; },
   hasFood(n) { return !!(n.base || n.food); },
+  // expected wait for a table: none while seats are free, else the guests ahead share the tables
+  seatWait(n) {
+    const seats = this.seats(n);
+    if ((n.eating || 0) < seats) return 0;
+    return ((n.waiting || 0) + 1) / seats * 35 * 60;
+  },
+
+  // ---------- spreading out ----------
+  // how much a guest minds crowds: everyone a little, better skiers a lot
+  crowdAversion(skill) { return 0.5 + (SKILL[skill].crowd || 0); },
+  // skiers per 100 m of piste right now
+  runCrowd(r) { return (r.load || 0) / Math.max(1, r.path.length / 100); },
+  // what a crowded piste costs, in seconds of queueing it feels like: the ride is that much less fun
+  runCrowdCost(r, skill) {
+    const d = this.runCrowd(r) / 6;                  // up to 6 skiers per 100 m feels fine
+    return Math.min(300, (r.path.length / (SKILL[skill].speed * 0.9)) * d * d);
+  },
+  // From node n: the hassle ahead (queueing, crowded pistes) on the best way on from here, in
+  // seconds, skiing down to the next lift. 0 where there's no lift ahead (the end of the day).
+  hassleAhead(n, skill) {
+    const key = Net.version + ':' + Math.floor(this.time / 30);
+    if (this._waKey !== key) { this._waKey = key; this._wa = new Map(); }
+    const k = n.id * 4 + skill;
+    if (this._wa.has(k)) return this._wa.get(k);
+    this._wa.set(k, 0);                                  // guards against loops through footpaths
+    const max = SKILL[skill].maxDiff, hubs = Net.hubOf(n);
+    let best = Infinity, any = false;
+    for (const h of hubs) {
+      for (const l of h.lifts) if (l.a === h && l.opt.open && !l.planned && this.liftUseful(l, skill)) { any = true; best = Math.min(best, Lifts.waitTime(l)); }
+      for (const r of h.runs) if (r.a === h && !r.planned && r.diff <= max && !hubs.includes(r.b)) { any = true; best = Math.min(best, this.runCrowdCost(r, skill) + this.hassleAhead(r.b, skill)); }
+    }
+    const v = Math.min(1800, any ? best : 0);
+    this._wa.set(k, v);
+    return v;
+  },
+  // at a base area: the shortest queue for a lift that leads somewhere for this guest, plus what's above it
+  baseHassle(b, skill) {
+    let best = 1800;
+    for (const h of Net.hubOf(b)) for (const l of h.lifts) if (l.a === h && l.opt.open && !l.planned && this.liftUseful(l, skill))
+      best = Math.min(best, Lifts.waitTime(l) + 0.25 * this.hassleAhead(l.b, skill));
+    return best;
+  },
+  // weight multiplier for heading into `cost` seconds of hassle
+  dodge(cost, skill) { return Math.exp(-this.crowdAversion(skill) * cost / 600); },
 
   // Travel time from every node to the nearest place to eat, for one skill level: skiing (only
   // runs they can ski), lifts (queue + ride) and footpaths. Refreshed every few game minutes, since
@@ -1312,11 +1366,12 @@ const Game = {
   },
   foodTime(skill) { return this.routeTime(skill, 'food'); },
   routeTime(skill, goal) {
-    const key = Net.version + ':' + Math.floor(this.time / 300);
+    const key = Net.version + ':' + Math.floor(this.time / 120);
     if (this._ftKey !== key) { this._ftKey = key; this._ft = {}; }
     if (this._ft[goal + skill]) return this._ft[goal + skill];
     const sk = SKILL[skill], dist = new Map(), done = new Set();
-    for (const n of Net.nodes) if (goal === 'food' ? this.hasFood(n) : n.base) dist.set(n, 0);
+    // a full restaurant counts as further away by the wait for a table, so guests head for one with room
+    for (const n of Net.nodes) if (goal === 'food' ? this.hasFood(n) : n.base) dist.set(n, goal === 'food' ? this.seatWait(n) : 0);
     const into = new Map();                          // node -> [ [from node, seconds] ] edges arriving here
     const edge = (a, b, t) => { if (!into.has(b)) into.set(b, []); into.get(b).push([a, t]); };
     for (const r of Net.runs) if (!r.planned && r.diff <= sk.maxDiff) edge(r.a, r.b, r.path.length / (sk.speed * 0.9));
@@ -1335,7 +1390,8 @@ const Game = {
 
   // Sit down if there's a free seat, otherwise wait for one.
   sitDown(s, place) {
-    place.eating = place.eating || 0;
+    place.eating = place.eating || 0; s.recheck = 0;
+    if (place !== s.leftFull) s.leftFull = null;
     s.state = 'eat'; s.node = place; s.edge = null; s.place = place; s.d = 0;
     s.seated = place.eating < this.seats(place);
     if (s.seated) this.takeSeat(s);
@@ -1350,7 +1406,28 @@ const Game = {
     this.money += m.spend; this.stats.food += m.spend; this.stats.meals++;
     if (place.food) place.food.today = (place.food.today || 0) + m.spend;
   },
+  // waiting at a full place: go and eat somewhere else if getting there is quicker than the wait here
+  eatElsewhere(s) {
+    s.recheck = 0;
+    const place = s.place, wait = this.seatWait(place);
+    if (wait < 5 * 60) return false;
+    const hubs = Net.hubOf(place), max = SKILL[s.skill].maxDiff;
+    const next = hubs.find((h) => h !== place && this.hasFood(h) && !this.seatWait(h));
+    if (next) { s.place = null; this.sitDown(s, next); return true; }          // room next door
+    const opts = [];
+    for (const h of hubs) {
+      for (const r of h.runs) if (r.a === h && !r.planned && r.diff <= max) opts.push([r, 1]);
+      for (const l of h.lifts) if (l.a === h && l.opt.open && !l.planned) opts.push([l, 1]);
+    }
+    for (const d of this.downRides(hubs)) opts.push([d, 1]);
+    const go = this.toward(s, opts, 'food');
+    if (!go || this.towardTime + 120 > wait) return false;
+    s.state = 'atNode'; s.seated = false; s.place = null; s.node = place; s.leftFull = place;
+    this.decide(s);                                  // s.need is kept, so this heads for the other place
+    return true;
+  },
   leaveTable(s) {
+    s.leftFull = null;
     if (s.state === 'eat' && s.seated && s.place) s.place.eating = Math.max(0, (s.place.eating || 1) - 1);
     s.seated = false; s.place = null; s.need = null;
   },
@@ -1368,6 +1445,7 @@ const Game = {
       const t = ride + rest + Math.random() * 30;
       if (t < bt) { bt = t; best = e; }
     }
+    this.towardTime = bt;
     return best;
   },
 
@@ -1421,12 +1499,14 @@ const Game = {
       s.happy -= s.need.kind === 'lunch' ? 12 : 4; this.stats.hungry++; s.need = null;
       this.warn('hungry', 'Guests are hungry and can\'t get to anywhere to eat in time. Build a mountain hut or a restaurant near your lifts.');
     }
+    let fullHere = null;
     if (s.need) {
-      const places = hubs.filter((h) => this.hasFood(h));
+      const places = hubs.filter((h) => this.hasFood(h) && h !== s.leftFull);
       if (places.length) {
-        // the place with the most free seats here (a hut beside a lodge: whichever is emptier)
-        places.sort((a, b) => (this.seats(b) - (b.eating || 0)) - (this.seats(a) - (a.eating || 0)));
-        return this.sitDown(s, places[0]);
+        // the place with the shortest wait, then the most free seats (a hut beside a lodge: whichever is emptier)
+        places.sort((a, b) => (this.seatWait(a) - this.seatWait(b)) || ((this.seats(b) - (b.eating || 0)) - (this.seats(a) - (a.eating || 0))));
+        if (!this.seatWait(places[0])) return this.sitDown(s, places[0]);
+        fullHere = places[0];                            // full: eat elsewhere if that's quicker, decided below
       }
     }
     if (atBase && tired) return this.leave(s);
@@ -1436,6 +1516,7 @@ const Game = {
       if (r.a !== h || r.planned || r.diff > sk.maxDiff) continue;
       let w = 1 + sk.pref[r.diff] + (r !== s.last ? 2 : 0);
       if (tired && r.b.base) w *= 4;
+      w *= this.dodge(this.runCrowdCost(r, s.skill) + this.hassleAhead(r.b, s.skill), s.skill);   // a quieter piste, a short queue at the bottom
       opts.push([r, w]);
     }
     for (const h of hubs) for (const l of h.lifts) {
@@ -1443,7 +1524,8 @@ const Game = {
       // pick by expected wait + ride time; beginners avoid T-bars, everyone likes a warm cabin
       let w = 3 / (1 + (Lifts.waitTime(l) + Lifts.rideTime(l) * 0.3) / 300);
       if (l.T.beginnerPenalty && s.skill === 0) w *= 0.3;
-      if (sk.crowd) w *= Math.exp(-sk.crowd * Lifts.waitTime(l) / 600);           // better skiers dodge the queues
+      // everyone dodges queues and crowded pistes, better skiers most: this queue, and the pistes from the top
+      w *= this.dodge(Lifts.waitTime(l) + 0.25 * this.hassleAhead(l.b, s.skill), s.skill);
       if (s.cameBy && s.cameBy.line && s.cameBy.line === l.line && !tired) w *= 4;   // stay seated through the station
       w *= 1 + (l.T.comfort || 0) * 0.05;
       opts.push([l, w]);
@@ -1464,6 +1546,7 @@ const Game = {
     };
     if (s.need) {
       const go = this.toward(s, goalOpts(), 'food');
+      if (fullHere && (!go || this.towardTime + 120 > this.seatWait(fullHere))) return this.sitDown(s, fullHere);
       if (go) { opts.length = 0; opts.push([go, 1]); }
     } else if (tired && !atBase) {
       const go = this.toward(s, goalOpts(), 'home');
@@ -1552,6 +1635,7 @@ const Game = {
         if (!s.seated) {                               // waiting for a table
           s.queued += dt; s.happy -= dt * 0.006;
           if ((s.place.eating || 0) < this.seats(s.place)) this.takeSeat(s);
+          else if (s.queued > 5 * 60 && (s.recheck = (s.recheck || 0) + dt) > 120 && this.eatElsewhere(s)) { /* heading off to another place */ }
           else if (s.queued > 20 * 60) { this.warn('full', `${s.place.food ? s.place.food.name : s.place.name} is full and guests are walking away hungry. Build more restaurants.`); this.stats.hungry++; s.happy -= 6; this.leaveTable(s); s.state = 'atNode'; }
         } else {
           s.eatLeft -= dt;
