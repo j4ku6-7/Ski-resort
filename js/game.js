@@ -681,6 +681,7 @@ const Net = {
       l.line = j.line = j.line || this.newLine();
       l.name = name || j.name;
       for (const k of ['color', 'pylon']) if (j.opt[k] != null && l.opt[k] == null) l.opt[k] = j.opt[k];
+      if (T.kind !== 'tram') { l.opt.speed = j.opt.speed; l.opt.density = j.opt.density; }   // carriers ride through: one rope speed
     } else if (plan.line) l.line = plan.line;
     Lifts.build(l);
     if (plan.joinWith) this.rebuildLift(plan.joinWith);   // its terminal at the shared node becomes the station
@@ -851,6 +852,13 @@ const Net = {
     return { ok: true, charge: p.charge };
   },
   recolorLift(l, hex) { for (const x of this.lineOf(l)) x.opt.color = hex; },
+  // carriers ride through the stations of a line, so all its sections run at one speed and spacing
+  // (each section of an aerial tramway is its own tramway with its own cabins, so those stay separate)
+  sharesSpeed(l) { return l.T.kind !== 'tram' && this.lineOf(l).length > 1; },
+  syncLine(l) {
+    if (l.T.kind === 'tram') return;
+    for (const x of this.lineOf(l)) { x.opt.speed = l.opt.speed; x.opt.density = l.opt.density; }
+  },
 
   // Replace a lift's pylons (from the pylon editor) and rebuild it.
   setTowers(l, towers) {
@@ -1598,6 +1606,7 @@ const Game = {
       }
     }
     for (const l of Net.lifts) if (l.line) Net.rebuildLift(l);   // stations need both sections to exist
+    for (const l of Net.lifts) if (l.line && !Lifts.partnerBelow(l)) Net.syncLine(l);   // older saves: the bottom section sets the speed
     this.untangled = Net.untangleStations();                       // older saves: pull overlapping stations apart
     Net.pruneNodes();
     for (const r of Net.runs) Net.seq.run = Math.max(Net.seq.run, r.piste + 1, r.id + 1);

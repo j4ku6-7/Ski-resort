@@ -140,7 +140,8 @@ const Lifts = {
   speed(l) { return l.T.speed * l.opt.speed; },
   interval(l) {
     if (l.T.kind === 'tram') return 2 * ((l.upPath ? l.upPath.length : l.len) / this.speed(l) + l.T.dwell);
-    return l.T.interval / l.opt.density;
+    // the carriers sit at a fixed spacing on the rope, so a slower rope sends them out less often
+    return l.T.interval / (l.opt.density * l.opt.speed);
   },
   capacity(l) { return l.opt.open ? (l.T.seats / this.interval(l)) * 3600 : 0; },
   rideTime(l) { return (l.upPath ? l.upPath.length : l.len) / this.speed(l); },

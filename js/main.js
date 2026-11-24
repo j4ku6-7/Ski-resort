@@ -1483,6 +1483,9 @@ const App = {
     $('#lp-speed').value = Math.round(l.opt.speed * 100);
     $('#lp-density').value = Math.round(l.opt.density * 100);
     $('#lp-density-row').hidden = T.kind === 'tram' || T.kind === 'belt';
+    const shared = Net.sharesSpeed(l);
+    $('#lp-shared').hidden = !shared;
+    if (shared) $('#lp-shared').textContent = `The carriers ride through the stations, so all ${Net.lineOf(l).length} sections of this line run at the same speed and with the same carriers.`;
     $('#lp-open').checked = l.opt.open;
     const st = $('#lp-style'), styled = T.kind === 'aerial' && T.station3d !== 'fixed';
     $('#lp-style-row').hidden = !styled;
@@ -1556,8 +1559,8 @@ const App = {
     $('#lp-close').onclick = () => this.closeLiftPanel();
     $('#lp-name').oninput = (e) => { if (L()) L().name = e.target.value.slice(0, 24) || L().name; };
     $('#lp-name').onchange = () => Save.write();
-    $('#lp-speed').oninput = (e) => { L().opt.speed = e.target.value / 100; this.refreshLiftPanel(); };
-    $('#lp-density').oninput = (e) => { L().opt.density = e.target.value / 100; this.refreshLiftPanel(); };
+    $('#lp-speed').oninput = (e) => { L().opt.speed = e.target.value / 100; Net.syncLine(L()); this.refreshLiftPanel(); };
+    $('#lp-density').oninput = (e) => { L().opt.density = e.target.value / 100; Net.syncLine(L()); this.refreshLiftPanel(); };
     for (const id of ['#lp-speed', '#lp-density']) $(id).onchange = () => Save.write();
     $('#lp-open').onchange = (e) => {
       if (!Net.setLiftOpen(L(), e.target.checked)) { e.target.checked = false; UI.toast(`${L().name} failed the safety inspection. Fix its pylons first.`); }

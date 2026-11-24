@@ -91,7 +91,7 @@ To move a save without the server:
 
    **Riding down:** guests can ride gondolas, funitels, 3S and tramways down as well as up. They do it when they're tired and riding is the quickest way home, to get to or from a restaurant, or when there's nothing they can ski from where they are. The lift panel shows how many rode down today.
 
-   Click a lift in View mode to rename it, change its line speed and how many carriers run, open or close it, upgrade it to another type (half the old lift's value is credited), or remove it.
+   Click a lift in View mode to rename it, change its line speed and how many carriers run, open or close it, upgrade it to another type (half the old lift's value is credited), or remove it. The carriers keep their spacing on the rope, so a slower line carries fewer people per hour and costs less to run. On a line with mid- or angle stations, the carriers ride through, so all its sections share one speed and carrier count (each section of an aerial tramway is its own tramway and keeps its own speed).
 2. **Ski run**: drag from a lift top down the slope, or click point by point. The line is smoothed into a curve. While you draw, the terrain shows a slope map and the preview is coloured by local steepness, with the steepest section marked. End on a lift bottom or a lodge, or press Enter, to finish.
    **Connecting pistes:** start a run in the middle of an existing piste to *branch off*, or end it on another piste to *join* it (a shortcut or merge). A cyan ring shows where it will connect. The piste is split there, keeping its number, and skiers choose which way to go at the junction. Lift stations can be placed on a piste the same way.
    Difficulty comes from the steepest 50 m of the run: Blue ≤ 25 %, Red ≤ 40 %, Black > 40 %.
