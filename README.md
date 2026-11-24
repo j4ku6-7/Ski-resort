@@ -20,7 +20,7 @@ Progress saves automatically in your browser every 20 seconds, after every chang
 
 ### Player ID and the save server
 With the save server running, progress is also stored on the server under your **player ID**, so you can continue on any computer that can reach it.
-1. Start the server on one computer: `node server.js` (Node 18 or newer, no install needed). It prints the addresses to open, for example `http://localhost:8080/` on that computer and `http://192.168.1.20:8080/` for other computers on the same network. Saves are kept in the `saves/` folder (or wherever `SAVES_DIR` points; `PORT` changes the port).
+1. Start the server on one computer: `node server.js` (Node 18 or newer, no install needed). It prints the addresses to open, for example `http://localhost:8642/` on that computer and `http://192.168.1.20:8642/` for other computers on the same network. Saves are kept in the `saves/` folder (or wherever `SAVES_DIR` points; `PORT` changes the port).
 2. Open the game from that address. The menu shows your player ID, for example `K7QM4-XPA2B`, with a Copy button.
 3. On the other computer, open the same address, type the ID under **Load progress** and confirm. That computer then uses the same ID and loads your resorts. Resorts that were only played there are kept and added to the ID.
 

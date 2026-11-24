@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Ski Resort save server: serves the game and stores each player's progress under a player ID.
-// No dependencies. Run:  node server.js   (optional: PORT=8080 SAVES_DIR=./saves)
+// No dependencies. Run:  node server.js   (optional: PORT=8642 SAVES_DIR=./saves)
 'use strict';
 const http = require('http');
 const fs = require('fs');
@@ -8,7 +8,9 @@ const path = require('path');
 const os = require('os');
 
 const ROOT = __dirname;
-const PORT = +process.env.PORT || 8080;
+// keep the port the same between runs: the browser keeps its saves per address, port included
+const FIXED = !!process.env.PORT;
+const PORT = +process.env.PORT || 8642;
 const SAVES = path.resolve(process.env.SAVES_DIR || path.join(ROOT, 'saves'));
 const MAX_BODY = 8 * 1024 * 1024;
 const ID_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;     // Crockford base32, 10 characters
@@ -108,9 +110,38 @@ const server = http.createServer((req, res) => {
   serveStatic(res, parts.join('/'));
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Ski Resort is running. Saves are kept in ${SAVES}`);
-  console.log(`  On this computer:   http://localhost:${PORT}/`);
-  for (const list of Object.values(os.networkInterfaces()))
-    for (const a of list || []) if (a.family === 'IPv4' && !a.internal) console.log(`  On your network:    http://${a.address}:${PORT}/`);
-});
+// addresses other computers can use (not Docker / VM bridges)
+function addresses() {
+  const out = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    if (/^(docker|br-|veth|virbr|vmnet|vboxnet|lxc|cni|flannel)/.test(name)) continue;
+    for (const a of list || []) if (a.family === 'IPv4' && !a.internal)
+      out.push({ ip: a.address, note: /^tailscale/.test(name) || a.address.startsWith('100.') ? ' (Tailscale, works from anywhere on your tailnet)' : '' });
+  }
+  return out;
+}
+
+function listen(port, tries) {
+  const onError = (e) => {
+    server.removeListener('listening', onListening);
+    if (e.code === 'EADDRINUSE' && !FIXED && tries > 0) {
+      console.log(`Port ${port} is already used by another program, trying ${port + 1}…`);
+      return listen(port + 1, tries - 1);
+    }
+    if (e.code === 'EADDRINUSE') console.error(`Port ${port} is already used by another program. Pick another one, for example:  PORT=${port + 1} node server.js`);
+    else console.error(e.message);
+    process.exit(1);
+  };
+  const onListening = () => {
+    server.removeListener('error', onError);
+    if (port !== PORT) console.log(`Note: the address is different from usual (port ${port} instead of ${PORT}). Your player ID still works: enter it in the menu.`);
+    console.log(`Ski Resort is running. Saves are kept in ${SAVES}`);
+    console.log(`  On this computer:   http://localhost:${port}/`);
+    for (const a of addresses()) console.log(`  On your network:    http://${a.ip}:${port}/${a.note}`);
+    console.log('Press Ctrl+C to stop.');
+  };
+  server.once('error', onError);
+  server.once('listening', onListening);
+  server.listen(port, '0.0.0.0');
+}
+listen(PORT, 10);
