@@ -543,10 +543,32 @@ const Lifts = {
       for (const z of [-0.95, 0, 0.95]) box(tx * 2 + 0.14, 0.11, 0.16, 0, 0.27, z, CAR);       // cross members
       box(0.08, 0.3 - hy, 0.5, 0, (0.27 + hy) / 2 + 0.05, 0, DARK);                            // grip arm between the track ropes
       box(0.2, 0.16, 0.7, 0, hy, 0, DARK);                                                     // grip jaws on the haul rope
-      box(-ox - tx + 0.1, 0.12, 0.4, (ox - tx) / 2, 0.27, 0, METAL);                           // hanger: out to the side
-      box(0.14, 2.75, 0.3, ox, 0.27 - 1.375, 0, METAL);                                        // down past the pylon
-      box(-ox + 0.1, 0.14, 0.3, ox / 2, -2.48, 0, METAL);                                      // and in over the cabin
-      cabin(2.7, 2.4, 3.5, 2.6, []);
+      // the hanger: one curved tube, out from the carriage, down past the pylon, and back in to the roof
+      const hang = new THREE.CatmullRomCurve3([[-tx - 0.05, 0.27], [-0.6, 0.12], [-0.86, -0.45], [-0.84, -1.35], [-0.6, -2.05], [-0.2, -2.5], [0, -2.62]]
+        .map(([x, y]) => new THREE.Vector3(x, y, 0)));
+      part(new THREE.TubeGeometry(hang, 28, 0.085, 7, false), DARK, 0, 0, 0);
+      box(0.3, 0.12, 0.5, -tx - 0.1, 0.27, 0, DARK);                                           // hanger head on the carriage
+      box(0.5, 0.1, 0.5, 0, -2.62, 0, DARK);                                                   // roof mount
+      // panoramic cabin: rounded ends, glazing almost floor to roof between painted corner pillars
+      const w = 2.75, h = 2.35, d = 3.6, top = -2.62, bot = top - h;
+      const rr = (W, H, D, rt, rb, yTop, c) => {                    // side profile with rounded corners, extruded across
+        const S = new THREE.Shape(), z0 = -D / 2, z1 = D / 2, y0 = yTop - H, y1 = yTop;
+        S.moveTo(z0 + rb, y0); S.lineTo(z1 - rb, y0); S.quadraticCurveTo(z1, y0, z1, y0 + rb);
+        S.lineTo(z1, y1 - rt); S.quadraticCurveTo(z1, y1, z1 - rt, y1); S.lineTo(z0 + rt, y1);
+        S.quadraticCurveTo(z0, y1, z0, y1 - rt); S.lineTo(z0, y0 + rb); S.quadraticCurveTo(z0, y0, z0 + rb, y0);
+        const g = new THREE.ExtrudeGeometry(S, { depth: W, bevelEnabled: false, curveSegments: 6 });
+        g.rotateY(-Math.PI / 2); g.translate(W / 2, 0, 0);
+        part(g, c, 0, 0, 0);
+      };
+      rr(w, h, d, 0.55, 0.3, top, PAINT);                                                      // shell in the lift's colour
+      rr(w * 0.9, 0.12, d * 0.86, 0.45, 0.05, top + 0.08, 0x2c3a4e);                           // dark roof cap
+      const g0 = bot + 0.62, g1 = top - 0.32, gm = (g0 + g1) / 2, gh = g1 - g0;
+      box(w + 0.04, gh, d - 0.62, 0, gm, 0, GLASS);                                            // side windows
+      box(w - 0.5, gh, d + 0.04, 0, gm, 0, GLASS);                                             // end windows
+      box(w + 0.05, 0.05, d - 0.6, 0, gm, 0, PAINT);                                           // window rail
+      box(0.05, gh, d + 0.06, 0, gm, 0, PAINT);                                                // door split in the end glass
+      box(w + 0.03, 0.34, d - 0.5, 0, bot + 0.36, 0, 0x2c3a4e);                                // dark lower panel
+      box(w * 0.94, 0.12, d * 0.9, 0, bot - 0.04, 0, 0x3a3f46);                                // underbody
     } else if (model === 'tram') {
       box(2.4, 0.8, 5, 0, -0.4, 0, 0x50565e);                   // carriage
       for (const x of [-0.57, 0.57]) for (const z of [-2, 0, 2]) box(0.3, 0.45, 0.6, x, -0.05, z, DARK);
