@@ -1213,11 +1213,16 @@ const App = {
         : 'Link this pylon\'s sheaves to the next pylon (up to 4 pylons, at most 45 m apart) to spread a big bend over more wheels.';
       $('#pp-wheels').value = sel.wheels || 0;
       $('#pp-wheels-v').textContent = sel.wheels ? `${sel.wheels} wheels` : `auto (${tr ? tr.n : '?'})`;
-      $('#pp-mode').value = sel.mode || 'auto';
-      $('#pp-mode').closest('label').hidden = !!this.edit.l.T.saddles;     // 3S: saddles under the ropes, nothing else
+      // 3S: saddles under the track ropes always; the choice is whether the haul rope is held down too
+      const modes = this.edit.l.T.saddles ? SADDLE_MODES : SHEAVE_MODES;
+      if ($('#pp-mode').dataset.set !== (this.edit.l.T.saddles ? '3s' : 'std')) {
+        $('#pp-mode').innerHTML = Object.entries(modes).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+        $('#pp-mode').dataset.set = this.edit.l.T.saddles ? '3s' : 'std';
+      }
+      $('#pp-mode').value = modes[sel.mode] ? sel.mode : 'auto';
       if (tr) {
         const over = tr.perWheel > MAX_BEND;
-        $('#pp-bend').innerHTML = `Rope bends <b>${tr.deg.toFixed(1)}°</b> here, ${tr.press ? 'pressing down' : 'lifting up'} · <b class="${over ? 'neg' : ''}">${tr.perWheel.toFixed(1)}° per wheel</b> (max ${MAX_BEND}°) · ${SHEAVE_MODES[tr.mode].toLowerCase()} wheels`;
+        $('#pp-bend').innerHTML = `Rope bends <b>${tr.deg.toFixed(1)}°</b> here, ${tr.press ? 'pressing down' : 'lifting up'} · <b class="${over ? 'neg' : ''}">${tr.perWheel.toFixed(1)}° per wheel</b> (max ${MAX_BEND}°) · ${this.edit.l.T.saddles ? SADDLE_MODES[tr.mode].toLowerCase() : SHEAVE_MODES[tr.mode].toLowerCase() + ' wheels'}`;
       }
     }
   },
@@ -1312,7 +1317,8 @@ const App = {
       ctx.beginPath(); ctx.arc(XH, sy(topY), 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       const tr = inf && inf.t;
       if (tr && inf.pi === tr.i) {                     // draw each train once (linked trains span several pylons)
-        const over = tr.perWheel > MAX_BEND, bad = over || (tr.mode === 'support' && !tr.press && tr.deg > 0.3) || (tr.mode === 'hold' && tr.press && tr.deg > 0.3);
+        const lifts = !tr.press && tr.deg > 0.3 && (tr.mode === 'support' || (this.edit && this.edit.l.T.saddles));   // 3S track ropes can't be held down
+        const over = tr.perWheel > MAX_BEND, bad = over || lifts || (tr.mode === 'hold' && tr.press && tr.deg > 0.3);
         const top = sy(topY), wr = Math.min(4, Math.max(2, (sx(tr.sp) - sx(0)) * 0.45));
         if (tr.linked) {
           ctx.strokeStyle = '#0aa8d6'; ctx.lineWidth = 2; ctx.beginPath();
@@ -1483,7 +1489,7 @@ const App = {
       if (ev.target.value === 'auto') delete e.towers[e.sel].mode; else e.towers[e.sel].mode = ev.target.value;
       this.applyPylons();
     };
-    $('#pp-mode').innerHTML = Object.entries(SHEAVE_MODES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+    $('#pp-mode').innerHTML = Object.entries(SHEAVE_MODES).map(([k, v]) => `<option value="${k}">${v}</option>`).join(''); $('#pp-mode').dataset.set = 'std';
     $('#pp-type').onchange = (ev) => {
       const e = this.edit; if (!e || e.sel == null) return;
       if (ev.target.value) e.towers[e.sel].type = ev.target.value; else delete e.towers[e.sel].type;
