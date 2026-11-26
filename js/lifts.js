@@ -973,7 +973,7 @@ const Lifts = {
       const rb = surface ? 0.8 : 1.4 + HL * 0.02, rt = surface ? 0.55 : 1.0;
       this._cyl(parts, 'steel', FS, rt, rb, HL + 0.4, 0, -0.4, 0, 12);
       if (surface) this._box(parts, 'steel', FS, reach + 0.5, 0.5, 0.5, -reach / 2, HL, 0);
-      else this._box(parts, 'steel', FS, reach * 2, 1.0, 1.0, 0, HL, 0);
+      else head(FS, HL, 'steel');                                   // same crossarm + gantry as the lattice pylon
       if (!surface) for (let y = 2; y < HL - 2; y += 1.4) this._box(parts, 'dark', FS, 0.6, 0.08, 0.08, 0, y, rb + 0.25);
     }
   },
@@ -1018,27 +1018,52 @@ const Lifts = {
     }
     for (const sx of [-1, 1]) for (const sz of [-1, 1])                                    // knee braces from the neck out under the head
       this._tube(parts, K, FS, [sx * nx, yN - 4, sz * nz], [sx * X * 0.55, yB, sz * zd], 0.22);
-    // inner frames beside each track, up past the ropes, joined over the middle
-    const xi = T.gauge - half - 3.6, fw = 0.8, fz = zd * 0.75, yF = yT + ropeUp + 6.5;
+    // lifting gantry over the ropes (like the gondola heads, but in lattice as on the photos): a lattice
+    // post on the inner side of each track, up well clear of the carriages, carrying a box-truss top
+    // beam that reaches out over both tracks, with knee braces under its overhangs, hoist brackets at
+    // its ends right over the ropes, a railed deck on top and the obstruction light.
+    const xi = T.gauge - half - 3.6, fw = 0.8, fz = zd * 0.75, yF = yT + ropeUp + 6.5, bd = 1.6, yb = yF - bd;
+    const XT = T.gauge + half + 0.9;                                                       // top beam reaches past the outer ropes
     for (const sx of [-1, 1]) {
       const cx = sx * xi;
-      for (const ox of [-fw, fw]) for (const oz of [-fz, fz]) this._tube(parts, K, FS, [cx + ox, yT, oz], [cx + ox, yF, oz], 0.2);
-      for (let y = yT, k = 0; y < yF - 0.5; y += 2.4, k++) {
-        const y2 = Math.min(yF, y + 2.4);
+      for (const ox of [-fw, fw]) for (const oz of [-fz, fz]) this._tube(parts, K, FS, [cx + ox, yT, oz], [cx + ox, yb, oz], 0.2);
+      for (let y = yT, k = 0; y < yb - 0.5; y += 2.4, k++) {
+        const y2 = Math.min(yb, y + 2.4);
         for (const oz of [-fz, fz]) this._tube(parts, K, FS, [cx - fw, k % 2 ? y : y2, oz], [cx + fw, k % 2 ? y2 : y, oz], 0.1);
         for (const ox of [-fw, fw]) this._tube(parts, K, FS, [cx + ox, y2, -fz], [cx + ox, y2, fz], 0.1);
+        for (const ox of [-fw, fw]) this._tube(parts, K, FS, [cx + ox, k % 2 ? y : y2, -fz], [cx + ox, k % 2 ? y2 : y, fz], 0.08);
       }
-      this._box(parts, 'grate', FS, fw * 2 + 1.6, 0.15, fz * 2 + 1.2, cx, yF, 0);                  // platform
-      for (const oz of [-fz - 0.6, fz + 0.6]) this._tube(parts, K, FS, [cx - fw - 0.8, yF + 1.1, oz], [cx + fw + 0.8, yF + 1.1, oz], 0.05);
-      for (const ox of [-fw - 0.8, fw + 0.8]) {
-        this._tube(parts, K, FS, [cx + ox, yF + 1.1, -fz - 0.6], [cx + ox, yF + 1.1, fz + 0.6], 0.05);
-        for (const oz of [-fz - 0.6, fz + 0.6]) this._tube(parts, K, FS, [cx + ox, yF, oz], [cx + ox, yF + 1.1, oz], 0.05);
+      this._tube(parts, K, FS, [cx - sx * fw, yb - 1, 0], [sx * 1.2, yT, 0], 0.18);           // brace down to the head centre
+      // knee braces from the post out under the overhang (above the carriages, which roll on the ropes)
+      for (const oz of [-fz, fz]) {
+        this._tube(parts, K, FS, [cx + sx * fw, yb - 3.2, oz], [sx * (T.gauge + half), yb, oz], 0.16);
+        this._tube(parts, K, FS, [cx + sx * fw, yb - 3.2, oz], [sx * (T.gauge - half), yb, oz], 0.1);
       }
-      this._tube(parts, K, FS, [cx - sx * fw, yF - 0.6, 0], [sx * 1.2, yT, 0], 0.18);           // brace down to the head centre
+      // hoist brackets at the beam ends, right over the two track ropes of this track
+      for (const ox of [-half, half]) this._box(parts, 'steel', FS, 0.5, 0.8, fz * 2 + 0.4, sx * (T.gauge + ox), yb - 0.45, 0);
     }
-    for (const oz of [-fz, fz]) this._tube(parts, K, FS, [-xi, yF - 0.3, oz], [xi, yF - 0.3, oz], 0.26);   // top beam
-    for (let k = 1; k < 6; k++) { const x = -xi + (2 * xi * k) / 6; this._tube(parts, K, FS, [x, yF - 0.3, -fz], [x, yF - 0.3, fz], 0.1); }
-    this._box(parts, 'accent', FS, 0.6, 0.45, 0.6, 0, yF + 0.1, 0);                               // obstruction light
+    // box-truss top beam: four chords, verticals and alternating diagonals on both faces and on top
+    for (const y of [yb, yF]) for (const oz of [-fz, fz]) this._tube(parts, K, FS, [-XT, y, oz], [XT, y, oz], 0.24);
+    const nt = Math.max(6, Math.round((2 * XT) / 2.4));
+    for (let k = 0; k <= nt; k++) {
+      const x = -XT + (2 * XT * k) / nt, x2 = -XT + (2 * XT * (k + 1)) / nt;
+      for (const oz of [-fz, fz]) {
+        this._tube(parts, K, FS, [x, yb, oz], [x, yF, oz], 0.12);
+        if (k < nt) this._tube(parts, K, FS, [x, k % 2 ? yb : yF, oz], [x2, k % 2 ? yF : yb, oz], 0.1);
+      }
+      for (const y of [yb, yF]) this._tube(parts, K, FS, [x, y, -fz], [x, y, fz], 0.1);
+      if (k < nt) this._tube(parts, K, FS, [x, yb, k % 2 ? -fz : fz], [x2, yb, k % 2 ? fz : -fz], 0.08);
+    }
+    // deck on top with railings along both sides and across the ends
+    this._box(parts, 'grate', FS, XT * 2, 0.15, fz * 2 + 0.6, 0, yF + 0.1, 0);
+    const rz = fz + 0.3;
+    for (const oz of [-rz, rz]) {
+      this._tube(parts, K, FS, [-XT, yF + 1.2, oz], [XT, yF + 1.2, oz], 0.05);
+      for (let k = 0; k <= nt; k += 2) { const x = -XT + (2 * XT * k) / nt; this._tube(parts, K, FS, [x, yF, oz], [x, yF + 1.2, oz], 0.05); }
+    }
+    for (const sx of [-1, 1]) this._tube(parts, K, FS, [sx * XT, yF + 1.2, -rz], [sx * XT, yF + 1.2, rz], 0.05);
+    this._tube(parts, K, FS, [0, yF, 0], [0, yF + 4, 0], 0.08);                                    // antenna mast
+    this._box(parts, 'accent', FS, 0.6, 0.45, 0.6, 0, yF + 0.5, 0);                               // obstruction light
   },
 
   station(parts, l, node, s, drive, rotY, P) {
