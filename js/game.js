@@ -1792,10 +1792,10 @@ const Game = {
     const cm = this.carMeshes, cnt = {};
     for (const k in cm) cnt[k] = 0;
     let col = null;
-    const putCar = (model, x, y, z, q) => {
+    const putCar = (model, x, y, z, q, sy = 1) => {
       const im = cm[model];
       if (cnt[model] >= im.instanceMatrix.count) return;
-      M.compose(V.set(x, y, z), q, S.set(1, 1, 1)); im.setColorAt(cnt[model], col); im.setMatrixAt(cnt[model]++, M);
+      M.compose(V.set(x, y, z), q, S.set(1, sy, 1)); im.setColorAt(cnt[model], col); im.setMatrixAt(cnt[model]++, M);
       if (model === 'chair6') cm.bubble.setMatrixAt(cnt.bubble++, M);
     };
     for (const l of Net.lifts) {
@@ -1808,8 +1808,24 @@ const Game = {
         const d = ph < tUp ? ph * v : ph < tUp + T.dwell ? L : ph < 2 * tUp + T.dwell ? L - (ph - tUp - T.dwell) * v : 0;
         let p = l.upPath.at(d, TMP); putCar('tram', p.x, p.y, p.z, l.quat);
         p = l.downPath.at(d, TMP); putCar('tram', p.x, p.y, p.z, l.quatDown);
+      } else if (T.kind === 'surface') {
+        // spring box on the rope; going up its rod is pulled out down to the rider's hips, coming back
+        // it is reeled in, with the T / platter just under the box
+        const sp = v * Lifts.interval(l), Lr = l.ropeUp.length, end = T.model + 'End', box = 0.56 * CS;
+        const hang = (p, q, lenY) => {
+          putCar(T.model, p.x, p.y, p.z, q);
+          const top = p.y - box, len = Math.max(0.4, top - lenY);
+          putCar('surfRod', p.x, top, p.z, q, len / CS);
+          putCar(end, p.x, top - len, p.z, q);
+        };
+        for (let d = (l.dist % sp); d < Lr; d += sp) {
+          let p = l.ropeUp.at(d, TMP);
+          hang(p, l.quat, Terrain.height(p.x, p.z) + 4.5);
+          p = l.downPath.at(d, TMP);
+          hang(p, l.quatDown, p.y - box - 1.2);
+        }
       } else if (T.model) {
-        const sp = v * Lifts.interval(l), up = T.kind === 'surface' ? l.ropeUp : l.upPath, Lr = up.length;
+        const sp = v * Lifts.interval(l), up = l.upPath, Lr = up.length;
         for (let d = (l.dist % sp); d < Lr; d += sp) {
           let p = up.at(d, TMP); putCar(T.model, p.x, p.y, p.z, l.quat);
           p = l.downPath.at(d, TMP); putCar(T.model, p.x, p.y, p.z, l.quatDown);
@@ -1822,7 +1838,7 @@ const Game = {
           if (T.kind === 'aerial') {
             const o = (k - (n - 1) / 2) * 0.62 * CS;
             putSkier(p.x + px * o, p.y - 2.75 * CS, p.z + pz * o, 0.55, s.skill);
-          } else putSkier(p.x + px * (k ? 1.5 : -1.5), p.y + 5.5, p.z + pz * (k ? 1.5 : -1.5), 0.8, s.skill);
+          } else { const o = n > 1 ? (k ? 1.5 : -1.5) : 0; putSkier(p.x + px * o, p.y + 5.5, p.z + pz * o, 0.8, s.skill); }
         });
       }
       if (l.downQueue && l.downQueue.length) {                    // waiting at the top to ride down

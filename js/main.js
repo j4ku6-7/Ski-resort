@@ -1300,7 +1300,7 @@ const App = {
       const style = Lifts.pylonType(l, t), w = Math.max(3, (sy(g) - sy(g + t.h)) * 0.12);
       ctx.beginPath();
       if (style === 'lattice') { ctx.moveTo(X - w, sy(g)); ctx.lineTo(XH, sy(topY)); ctx.lineTo(X + w, sy(g)); }
-      else if (style === 'portal') { ctx.moveTo(X - 4, sy(g)); ctx.lineTo(XH - 3, sy(topY)); ctx.lineTo(XH + 3, sy(topY)); ctx.lineTo(X + 4, sy(g)); }
+      else if (style === 'portal' || style === 'latticePortal') { ctx.moveTo(X - 4, sy(g)); ctx.lineTo(XH - 3, sy(topY)); ctx.lineTo(XH + 3, sy(topY)); ctx.lineTo(X + 4, sy(g)); }
       else if (style === 'twin' && inf && inf.heads.length > 1) {
         for (const h of inf.heads) { ctx.moveTo(sx(h.s), sy(P.ground(h.s))); ctx.lineTo(sx(h.s), sy(h.y)); }
         ctx.moveTo(sx(inf.heads[0].s) - 6, sy(inf.heads[0].y)); ctx.lineTo(sx(inf.heads[1].s) + 6, sy(inf.heads[1].y));
