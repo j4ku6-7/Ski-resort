@@ -24,7 +24,7 @@ const LIFT_TYPES = {
     desc: 'A conveyor belt for the beginner area. Short and gentle only.',
   },
   tbar: {
-    name: 'T-bar', icon: '⊤', kind: 'surface', model: 'tbar', pylons: ['tube'],
+    name: 'T-bar', icon: '⊤', kind: 'surface', model: 'tbar', pylons: ['tube', 'portal', 'latticePortal'],
     maxSpan: 150, maxTowerH: 14,
     speed: 3, interval: 4.5, seats: 2, minLen: 100, maxLen: 1500, minVert: 10, maxGrade: 0.6,
     baseCost: 30000, perM: 45, towerCost: 3000, opBase: 1200, opPerM: 0.8, cold: 1.2,
@@ -40,7 +40,7 @@ const LIFT_TYPES = {
     desc: 'One skier at a time sits on a platter on a telescopic pole. Cheap and a bit easier for beginners than a T-bar, slopes up to 55%.',
   },
   chair2: {
-    name: 'Double chair', icon: '⑂', kind: 'aerial', model: 'chair2', station3d: 'fixed', pylons: ['tube', 'y', 'lattice', 'portal', 'latticePortal'],
+    name: 'Double chair', icon: '⑂', kind: 'aerial', model: 'chair2', station3d: 'fixed', pylons: ['tube', 'y', 'lattice'],
     maxSpan: 300, maxTowerH: 40,
     speed: 2.3, interval: 5.5, seats: 2, minLen: 150, maxLen: 2200, minVert: 20,
     baseCost: 40000, perM: 45, towerCost: 6000, opBase: 1500, opPerM: 1.0, cold: 1,
@@ -48,7 +48,7 @@ const LIFT_TYPES = {
     desc: 'Fixed-grip double chair. Cheap but slow; long rides get cold.',
   },
   chair4: {
-    name: 'Detachable quad', icon: '⑃', kind: 'aerial', model: 'chair4', pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal', 'latticePortal'],
+    name: 'Detachable quad', icon: '⑃', kind: 'aerial', model: 'chair4', pylons: ['mgd', 'y', 'twin', 'tube', 'lattice'],
     maxSpan: 350, maxTowerH: 45,
     speed: 5, interval: 6, seats: 4, minLen: 150, maxLen: 3000, minVert: 20,
     baseCost: 120000, perM: 70, towerCost: 9000, opBase: 3000, opPerM: 1.6, cold: 1,
@@ -56,7 +56,7 @@ const LIFT_TYPES = {
     desc: 'High-speed chairs that slow down in the stations. The workhorse lift.',
   },
   chair6: {
-    name: '6-seat bubble chair', icon: '⑆', kind: 'aerial', model: 'chair6', bubble: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal', 'latticePortal'],
+    name: '6-seat bubble chair', icon: '⑆', kind: 'aerial', model: 'chair6', bubble: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice'],
     maxSpan: 350, maxTowerH: 45,
     speed: 5, interval: 5.4, seats: 6, minLen: 150, maxLen: 3200, minVert: 20,
     baseCost: 200000, perM: 90, towerCost: 12000, opBase: 4500, opPerM: 2, cold: 0.3,
@@ -64,7 +64,7 @@ const LIFT_TYPES = {
     desc: 'High capacity, with weather bubbles and heated seats.',
   },
   gondola6: {
-    name: '6-person gondola', icon: '▢', kind: 'aerial', model: 'cabin6', enclosed: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal', 'latticePortal'],
+    name: '6-person gondola', icon: '▢', kind: 'aerial', model: 'cabin6', enclosed: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal'],
     maxSpan: 500, maxTowerH: 60,
     speed: 5, interval: 9, seats: 6, minLen: 300, maxLen: 5000, minVert: 30,
     baseCost: 190000, perM: 100, towerCost: 12000, opBase: 4500, opPerM: 2, cold: 0,
@@ -72,7 +72,7 @@ const LIFT_TYPES = {
     desc: 'Compact enclosed cabins. A cheaper gondola for medium-length lifts.',
   },
   gondola: {
-    name: '8-person gondola', icon: '▣', kind: 'aerial', model: 'gondola', enclosed: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal', 'latticePortal'],
+    name: '8-person gondola', icon: '▣', kind: 'aerial', model: 'gondola', enclosed: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal'],
     maxSpan: 600, maxTowerH: 65,
     speed: 6, interval: 10, seats: 8, minLen: 300, maxLen: 6000, minVert: 30,
     baseCost: 250000, perM: 120, towerCost: 15000, opBase: 6000, opPerM: 2.5, cold: 0,
@@ -80,7 +80,7 @@ const LIFT_TYPES = {
     desc: 'Enclosed cabins for long lifts from the valley. Warm and comfortable.',
   },
   gondola10: {
-    name: '10-person gondola', icon: '▤', kind: 'aerial', model: 'cabin10', enclosed: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal', 'latticePortal'],
+    name: '10-person gondola', icon: '▤', kind: 'aerial', model: 'cabin10', enclosed: true, pylons: ['mgd', 'y', 'twin', 'tube', 'lattice', 'portal'],
     maxSpan: 650, maxTowerH: 70,
     speed: 6, interval: 10, seats: 10, minLen: 300, maxLen: 6500, minVert: 30,
     baseCost: 330000, perM: 140, towerCost: 18000, opBase: 7000, opPerM: 2.8, cold: 0,
@@ -88,7 +88,7 @@ const LIFT_TYPES = {
     desc: 'Big panoramic cabins with lots of glass. High capacity on long lines.',
   },
   funitel: {
-    name: 'Funitel', icon: '⧈', kind: 'aerial', model: 'funitel', enclosed: true, ropes: [-3.2, 3.2], pylons: ['portal', 'y', 'twin', 'mgd', 'lattice', 'latticePortal'],
+    name: 'Funitel', icon: '⧈', kind: 'aerial', model: 'funitel', enclosed: true, ropes: [-3.2, 3.2], pylons: ['portal', 'y', 'twin', 'mgd', 'lattice'],
     maxSpan: 900, maxTowerH: 80,
     speed: 7, interval: 18, seats: 24, minLen: 500, maxLen: 4500, minVert: 50,
     baseCost: 900000, perM: 260, towerCost: 60000, opBase: 12000, opPerM: 4, cold: 0,
@@ -96,7 +96,7 @@ const LIFT_TYPES = {
     desc: 'Wide cabins hung from two ropes: very stable in wind, fast, and 24 people per cabin.',
   },
   gondola3s: {
-    name: '3S tricable gondola', icon: '⫴', kind: 'aerial', model: 'cabin3s', enclosed: true, pylons: ['lattice', 'y', 'portal', 'latticePortal'],
+    name: '3S tricable gondola', icon: '⫴', kind: 'aerial', model: 'cabin3s', enclosed: true, pylons: ['lattice', 'y', 'portal'],
     // per track: two track ropes the carriage rolls on, the haul rope centred between them and lower,
     // clamped by the grip. On the pylons the track ropes lie in saddles, the haul rope runs on sheaves.
     ropes: [-1.2, 0, 1.2], ropeY: [0, -1.3, 0], haulRope: 1, saddles: true,
@@ -107,7 +107,7 @@ const LIFT_TYPES = {
     desc: 'Two track ropes per direction carry the cabins, a haul rope pulls them: kilometre-long spans with only a few huge pylons, 32 people per cabin.',
   },
   tram: {
-    name: 'Aerial tramway', icon: '⛫', kind: 'tram', model: 'tram', enclosed: true, ropes: [-2, 2], pylons: ['lattice', 'portal', 'latticePortal'],
+    name: 'Aerial tramway', icon: '⛫', kind: 'tram', model: 'tram', enclosed: true, ropes: [-2, 2], pylons: ['lattice', 'portal'],
     maxSpan: 3000, maxTowerH: 120,
     speed: 10, seats: 80, dwell: 90, minLen: 400, maxLen: 5000, minVert: 100,
     baseCost: 600000, perM: 250, towerCost: 90000, opBase: 9000, opPerM: 3, cold: 0,
@@ -984,16 +984,18 @@ const Lifts = {
       else head(FS, HL, 'steel');
     } else if (style === 'portal' || style === 'latticePortal') {
       // the legs stand outside the carriers (which hang centred under each track), and a tie between
-      // them only goes in below the carriers' bottoms
+      // them only goes in below the carriers' bottoms. On a T-bar the legs stand outside the riders
+      // being dragged along the snow, and there's no tie: the skiers pass at ground level.
       const ce = this.carrierExtent(T), lx = T.gauge + Math.max(ext, ce.hw) + 1.5;
-      const tieY = Math.min(HL * 0.55, ropeTop - ce.depth - 2.5);
+      const tieY = surface ? 0 : Math.min(HL * 0.55, ropeTop - ce.depth - 2.5);
       if (style === 'portal') {
-        const splay = HL * 0.07;
+        const splay = HL * 0.07, k = surface ? 0.4 : 1;
         for (const sx of [-1, 1]) {
-          this._strut(parts, 'steel', FS, [sx * (lx + splay), 0, 0], [sx * lx, HL, 0], 1.6);
-          this._box(parts, 'concrete', F, 3.5, 1.4, 3.5, sx * (lx + splay), 0.2, 0);
+          this._strut(parts, 'steel', FS, [sx * (lx + splay), 0, 0], [sx * lx, HL, 0], 1.6 * k);
+          this._box(parts, 'concrete', F, 3.5 * k + 0.6, 1.4, 3.5 * k + 0.6, sx * (lx + splay), 0.2, 0);
+          if (surface) this._strut(parts, 'steel', FS, [sx * lx, HL - 2.2, 0], [sx * (lx - 2), HL - 0.3, 0], 0.22);   // knee brace
         }
-        this._box(parts, 'steel', FS, lx * 2 + 2.4, 1.8, 2, 0, HL, 0);
+        this._box(parts, 'steel', FS, lx * 2 + 2.4 * k, 1.8 * k, 2 * k, 0, HL, 0);
         if (tieY > 3) this._box(parts, 'steel', FS, lx * 2, 0.8, 0.9, 0, tieY, 0);
       } else this._latticePortal(parts, F, FS, HL, lx, tieY);
     } else {
