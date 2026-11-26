@@ -1820,7 +1820,7 @@ const Game = {
         };
         for (let d = (l.dist % sp); d < Lr; d += sp) {
           let p = l.ropeUp.at(d, TMP);
-          hang(p, l.quat, Terrain.height(p.x, p.z) + 4.5);
+          hang(p, l.quat, Terrain.height(p.x, p.z) + 2.8);                 // at the riders' hips
           p = l.downPath.at(d, TMP);
           hang(p, l.quatDown, p.y - box - 1.2);
         }
@@ -1838,7 +1838,7 @@ const Game = {
           if (T.kind === 'aerial') {
             const o = (k - (n - 1) / 2) * 0.62 * CS;
             putSkier(p.x + px * o, p.y - 2.75 * CS, p.z + pz * o, 0.55, s.skill);
-          } else { const o = n > 1 ? (k ? 1.5 : -1.5) : 0; putSkier(p.x + px * o, p.y + 5.5, p.z + pz * o, 0.8, s.skill); }
+          } else { const o = n > 1 ? (k ? 1.5 : -1.5) : 0; putSkier(p.x + px * o, p.y + 3.1, p.z + pz * o, 0.6, s.skill); }   // same size as chair riders, on the snow
         });
       }
       if (l.downQueue && l.downQueue.length) {                    // waiting at the top to ride down

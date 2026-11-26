@@ -25,18 +25,18 @@ const LIFT_TYPES = {
   },
   tbar: {
     name: 'T-bar', icon: '⊤', kind: 'surface', model: 'tbar', pylons: ['tube', 'portal', 'latticePortal'],
-    maxSpan: 150, maxTowerH: 14,
+    maxSpan: 150, maxTowerH: 18,
     speed: 3, interval: 4.5, seats: 2, minLen: 100, maxLen: 1500, minVert: 10, maxGrade: 0.6,
     baseCost: 30000, perM: 45, towerCost: 3000, opBase: 1200, opPerM: 0.8, cold: 1.2,
-    gauge: 4.5, towerGap: 100, towerH: 10, maxClear: 13, sag: 0.008, comfort: -1, beginnerPenalty: 5, station: 0x7c8794, color: 0x9aa3ad,
+    gauge: 4.5, towerGap: 100, towerH: 13, maxClear: 17, sag: 0.008, comfort: -1, beginnerPenalty: 5, station: 0x7c8794, color: 0x9aa3ad,
     desc: 'A cheap surface lift that drags skiers uphill. Beginners hate it, and slopes are limited to 60%.',
   },
   poma: {
     name: 'Poma (button lift)', icon: '⊥', kind: 'surface', model: 'poma', pylons: ['tube'],
-    maxSpan: 140, maxTowerH: 12,
+    maxSpan: 140, maxTowerH: 16,
     speed: 3, interval: 3.5, seats: 1, minLen: 80, maxLen: 1200, minVert: 8, maxGrade: 0.55,
     baseCost: 24000, perM: 38, towerCost: 2500, opBase: 1000, opPerM: 0.7, cold: 1.2,
-    gauge: 3.2, towerGap: 90, towerH: 9, maxClear: 12, sag: 0.008, comfort: -1, beginnerPenalty: 3, station: 0x8a7f6c, color: 0xe0a21a,
+    gauge: 3.2, towerGap: 90, towerH: 12, maxClear: 16, sag: 0.008, comfort: -1, beginnerPenalty: 3, station: 0x8a7f6c, color: 0xe0a21a,
     desc: 'One skier at a time sits on a platter on a telescopic pole. Cheap and a bit easier for beginners than a T-bar, slopes up to 55%.',
   },
   chair2: {
@@ -218,7 +218,7 @@ const Lifts = {
     if (T.kind === 'belt') { out.prof = [{ s: 0, y: ya }, { s: hl, y: yb }]; return out; }
     const prof = [{ s: 0, y: ya + H }, { s: hl, y: yb + H }];
     // surface lifts: the rope stays above the riders' heads (they're drawn at map scale too)
-    const minClear = T.kind === 'surface' ? 7.5 : (T.hang || 1) * CS + 3;
+    const minClear = T.kind === 'surface' ? 9.5 : (T.hang || 1) * CS + 3;
     const cy = (p, q, s) => {
       const span = q.s - p.s, u = (s - p.s) / span;
       return p.y + (q.y - p.y) * u - 4 * T.sag * span * u * (1 - u);
@@ -403,7 +403,7 @@ const Lifts = {
       for (let s = p.s; s <= q.s; s += 5) {
         const y = P.cableY(p, q, s), g = P.ground(s), clear = y - hang - g;
         let st;
-        if (T.kind === 'surface') st = clear < 2 ? 'hit' : clear > T.maxClear ? 'high' : 'ok';
+        if (T.kind === 'surface') st = clear < 8 ? 'hit' : clear > T.maxClear ? 'high' : 'ok';
         else st = clear < 1 ? 'hit' : clear < 3 ? 'low' : y - g > T.maxClear ? 'high' : 'ok';
         if (st === 'hit' && !inHit) hitRuns++;
         inHit = st === 'hit';
@@ -411,7 +411,7 @@ const Lifts = {
         samples.push({ s, x: a.x + P.ux * s, y, z: a.z + P.uz * s, st });
       }
     }
-    if (hitRuns) issues.push(T.kind === 'surface' ? `The rope drags on the snow in ${hitRuns} place${hitRuns > 1 ? 's' : ''}` :
+    if (hitRuns) issues.push(T.kind === 'surface' ? `The rope runs too low over the riders in ${hitRuns} place${hitRuns > 1 ? 's' : ''}` :
       `Carriers would hit the snow in ${hitRuns} place${hitRuns > 1 ? 's' : ''}`);
     if (high) issues.push(T.kind === 'surface' ? 'The rope is too high, so the hangers can\'t reach the skiers' :
       `${T.enclosed ? 'Cabins hang' : 'Chairs hang'} ${Math.round(high)} m above the ground (max ${T.maxClear} m), too high to evacuate`);
@@ -836,6 +836,11 @@ const Lifts = {
     // shape: its axis has length HL and tilts by atan(dz / H), which puts its top right under the head
     const F = new THREE.Matrix4().makeRotationY(rotY).premultiply(new THREE.Matrix4().makeTranslation(x, gy, z));
     const HL = Math.hypot(H, dz), FS = F.clone().multiply(new THREE.Matrix4().makeRotationX(Math.atan2(dz, Math.max(1, H))));
+    // Portals carry their beam over the ropes (the carriers' hangers and the T-bar rods pass under it),
+    // and every sheave train hangs from it on the outer side of its rope. 3S saddles still sit on a beam.
+    const overhead = (style === 'portal' || style === 'latticePortal') && !T.saddles && !p.ypair;
+    let topAbs = p.y + (surface ? 1.8 : 2.8);
+    if (overhead && t.bal.hold) topAbs = Math.max(topAbs, Math.max(...t.bal.hold.map((q) => q[1])) + 1.0);
     // hangers from the arm to the balancer of each set, on every rope
     for (const set of t.mode === 'both' ? ['support', 'hold'] : [t.mode]) {
       const bal = t.bal[set].reduce((b, q) => (Math.abs(q[0] - p.s) < Math.abs(b[0] - p.s) ? q : b));
@@ -847,6 +852,10 @@ const Lifts = {
           continue;
         }
         if (T.saddles) continue;                         // the haul rope sheaves hang between the girders
+        if (overhead) {                                  // down from the portal beam, beside the rope
+          this._strut(parts, 'steel', FL, [bx, topAbs, p.s], [bx, bal[1], bal[0]], surface ? 0.3 : 0.5);
+          continue;
+        }
         if (set === 'hold' && t.mode === 'both') {                    // top set of a "both" train: yoke over the rope
           this._strut(parts, 'steel', FL, [bx, armAbs, p.s], [bx + sgn * 1, armAbs, p.s], 0.6);
           this._strut(parts, 'steel', FL, [bx + sgn * 1, armAbs, p.s], [bx + sgn * 1, bal[1], bal[0]], 0.5);
@@ -987,17 +996,20 @@ const Lifts = {
       // them only goes in below the carriers' bottoms. On a T-bar the legs stand outside the riders
       // being dragged along the snow, and there's no tie: the skiers pass at ground level.
       const ce = this.carrierExtent(T), lx = T.gauge + Math.max(ext, ce.hw) + 1.5;
-      const tieY = surface ? 0 : Math.min(HL * 0.55, ropeTop - ce.depth - 2.5);
+      // beam bottom in the pylon frame: over the ropes, or (3S) under the saddles at the crossarm
+      const yB = overhead ? ((topAbs - gy) * HL) / Math.max(1, H) : HL - 0.9;
+      const tieY = surface ? 0 : Math.min(yB * 0.55, ropeTop - ce.depth - 2.5);
+      const k = surface ? 0.4 : 1;                                    // T-bar portals are much lighter
       if (style === 'portal') {
-        const splay = HL * 0.07, k = surface ? 0.4 : 1;
+        const splay = yB * 0.07, bh = 1.8 * k;
         for (const sx of [-1, 1]) {
-          this._strut(parts, 'steel', FS, [sx * (lx + splay), 0, 0], [sx * lx, HL, 0], 1.6 * k);
+          this._strut(parts, 'steel', FS, [sx * (lx + splay), 0, 0], [sx * lx, yB + bh, 0], 1.6 * k);
           this._box(parts, 'concrete', F, 3.5 * k + 0.6, 1.4, 3.5 * k + 0.6, sx * (lx + splay), 0.2, 0);
-          if (surface) this._strut(parts, 'steel', FS, [sx * lx, HL - 2.2, 0], [sx * (lx - 2), HL - 0.3, 0], 0.22);   // knee brace
+          this._strut(parts, 'steel', FS, [sx * lx, yB - 2.4 * k - 0.6, 0], [sx * (lx - 2.4 * k - 0.6), yB, 0], 0.55 * k);   // knee brace
         }
-        this._box(parts, 'steel', FS, lx * 2 + 2.4 * k, 1.8 * k, 2 * k, 0, HL, 0);
+        this._box(parts, 'steel', FS, lx * 2 + 2.4 * k, bh, 2 * k, 0, yB + bh / 2, 0);
         if (tieY > 3) this._box(parts, 'steel', FS, lx * 2, 0.8, 0.9, 0, tieY, 0);
-      } else this._latticePortal(parts, F, FS, HL, lx, tieY);
+      } else this._latticePortal(parts, F, FS, yB, lx, tieY, k);
     } else {
       const rb = surface ? 0.8 : 1.4 + HL * 0.02, rt = surface ? 0.55 : 1.0;
       this._cyl(parts, 'steel', FS, rt, rb, HL + 0.4, 0, -0.4, 0, 12);
@@ -1013,6 +1025,7 @@ const Lifts = {
   // Half width and depth below the rope of a lift's carriers (metres, as drawn), for clearances.
   carrierExtent(T) {
     const m = T.model || '';
+    if (T.kind === 'surface') return { hw: m === 'poma' ? 1.7 : 3.2, depth: 0 };   // riders on the snow, as drawn
     const w = m.startsWith('chair') ? (+m.slice(5)) * 0.62 + 0.2
       : { cabin6: 1.7, gondola: 1.9, cabin10: 2.2, funitel: 2.9, cabin3s: 2.75, tram: 4.2 }[m] || 1.2;
     return { hw: (w / 2) * CS, depth: (T.hang || 1) * CS };
@@ -1021,51 +1034,54 @@ const Lifts = {
   // Lattice portal: at each end a four-legged lattice tower tapering upwards, standing outside the
   // carriers; across the top a box-truss girder that carries the sheave trains; knee braces in the
   // corners; and a lattice tie lower down where the carriers clear it. lx: leg axis, tieY: tie height.
-  _latticePortal(parts, F, FS, HL, lx, tieY) {
+  // HL: height of the girder's bottom (over the ropes); k: size factor (T-bar portals are much lighter).
+  _latticePortal(parts, F, FS, HL, lx, tieY, k = 1) {
     const K = 'steel', C = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
-    const wb = Math.max(1.8, HL * 0.08), wt = 1.0, zb = Math.max(2.2, HL * 0.1), zt = 1.2, splay = HL * 0.06;
-    const segs = Math.max(2, Math.round(HL / 5));
+    const gd = Math.max(1.1, 2.2 * k), Ht = HL + gd;                  // girder depth, tower tops
+    const wb = Math.max(1.8 * k, Ht * 0.08 * k), wt = 1.0 * k, zb = Math.max(2.2 * k, Ht * 0.1 * k), zt = 1.2 * k, splay = Ht * 0.04;
+    const segs = Math.max(2, Math.round(Ht / (5 * Math.max(k, 0.5))));
+    const r = (x) => x * Math.max(k, 0.4);                          // member radius
     for (const sx of [-1, 1]) {
       const cx = (u) => sx * (lx + splay * (1 - u));
-      const at = (u, a, b) => [cx(u) + a * (wb + (wt - wb) * u), HL * u, b * (zb + (zt - zb) * u)];
+      const at = (u, a, b) => [cx(u) + a * (wb + (wt - wb) * u), Ht * u, b * (zb + (zt - zb) * u)];
       for (const [a, b] of C) {
-        this._tube(parts, K, FS, at(0, a, b), at(1, a, b), 0.32);
-        this._box(parts, 'concrete', F, 1.8, 1.2, 1.8, at(0, a, b)[0], 0.2, at(0, a, b)[2]);
+        this._tube(parts, K, FS, at(0, a, b), at(1, a, b), r(0.32));
+        this._box(parts, 'concrete', F, 1.8 * k + 0.4, 1.2, 1.8 * k + 0.4, at(0, a, b)[0], 0.2, at(0, a, b)[2]);
       }
-      for (let k = 0; k < segs; k++) {
-        const u0 = k / segs, u1 = (k + 1) / segs;
+      for (let j = 0; j < segs; j++) {
+        const u0 = j / segs, u1 = (j + 1) / segs;
         for (let c = 0; c < 4; c++) {
           const [a0, b0] = C[c], [a1, b1] = C[(c + 1) % 4];
-          this._tube(parts, K, FS, at(u1, a0, b0), at(u1, a1, b1), 0.14);
-          this._tube(parts, K, FS, k % 2 ? at(u0, a0, b0) : at(u0, a1, b1), k % 2 ? at(u1, a1, b1) : at(u1, a0, b0), 0.12);
+          this._tube(parts, K, FS, at(u1, a0, b0), at(u1, a1, b1), r(0.14));
+          this._tube(parts, K, FS, j % 2 ? at(u0, a0, b0) : at(u0, a1, b1), j % 2 ? at(u1, a1, b1) : at(u1, a0, b0), r(0.12));
         }
       }
     }
-    // girder across the top: bottom and top chords on both faces, verticals, alternating diagonals
-    const X = lx + wt + 0.6, gd = 2.2, yb = HL - gd + 0.6, yt = HL + 0.6, gz = zt;
-    for (const y of [yb, yt]) for (const z of [-gz, gz]) this._tube(parts, K, FS, [-X, y, z], [X, y, z], 0.24);
-    const n = Math.max(6, Math.round((2 * X) / 2.4));
-    for (let k = 0; k <= n; k++) {
-      const x = -X + (2 * X * k) / n, x2 = -X + (2 * X * (k + 1)) / n;
+    // girder between the tower tops, over the ropes: chords on both faces, verticals, alternating diagonals
+    const X = lx + wt, yb = HL, yt = Ht, gz = zt, step = Math.max(1.2, 2.4 * k);
+    for (const y of [yb, yt]) for (const z of [-gz, gz]) this._tube(parts, K, FS, [-X, y, z], [X, y, z], r(0.24));
+    const n = Math.max(6, Math.round((2 * X) / step));
+    for (let j = 0; j <= n; j++) {
+      const x = -X + (2 * X * j) / n, x2 = -X + (2 * X * (j + 1)) / n;
       for (const z of [-gz, gz]) {
-        this._tube(parts, K, FS, [x, yb, z], [x, yt, z], 0.12);
-        if (k < n) this._tube(parts, K, FS, [x, k % 2 ? yb : yt, z], [x2, k % 2 ? yt : yb, z], 0.1);
+        this._tube(parts, K, FS, [x, yb, z], [x, yt, z], r(0.12));
+        if (j < n) this._tube(parts, K, FS, [x, j % 2 ? yb : yt, z], [x2, j % 2 ? yt : yb, z], r(0.1));
       }
-      for (const y of [yb, yt]) this._tube(parts, K, FS, [x, y, -gz], [x, y, gz], 0.1);
+      for (const y of [yb, yt]) this._tube(parts, K, FS, [x, y, -gz], [x, y, gz], r(0.1));
     }
-    for (const sx of [-1, 1]) for (const z of [-gz, gz]) {        // knee braces from the legs to the girder
-      this._tube(parts, K, FS, [sx * (lx - wt), yb - 1.6, z], [sx * (lx - wt - 1.3), yb, z], 0.18);   // short: carriers pass inside
+    for (const sx of [-1, 1]) for (const z of [-gz, gz]) {        // knee braces from the towers to the girder
+      this._tube(parts, K, FS, [sx * (lx - wt), yb - 1.6 * k - 0.4, z], [sx * (lx - wt - 1.3 * k - 0.4), yb, z], r(0.18));
     }
     if (tieY > 3) {                                               // lattice tie between the towers
-      const u = tieY / HL, xi = lx + splay * (1 - u) - (wb + (wt - wb) * u), z = zb + (zt - zb) * u;
+      const u = tieY / Ht, xi = lx + splay * (1 - u) - (wb + (wt - wb) * u), z = zb + (zt - zb) * u;
       for (const y of [tieY - 0.6, tieY + 0.6]) for (const s of [-z, z]) this._tube(parts, K, FS, [-xi, y, s], [xi, y, s], 0.16);
       const m = Math.max(4, Math.round((2 * xi) / 2));
-      for (let k = 0; k < m; k++) {
-        const x0 = -xi + (2 * xi * k) / m, x1 = -xi + (2 * xi * (k + 1)) / m;
-        for (const s of [-z, z]) this._tube(parts, K, FS, [x0, k % 2 ? tieY - 0.6 : tieY + 0.6, s], [x1, k % 2 ? tieY + 0.6 : tieY - 0.6, s], 0.08);
+      for (let j = 0; j < m; j++) {
+        const x0 = -xi + (2 * xi * j) / m, x1 = -xi + (2 * xi * (j + 1)) / m;
+        for (const s of [-z, z]) this._tube(parts, K, FS, [x0, j % 2 ? tieY - 0.6 : tieY + 0.6, s], [x1, j % 2 ? tieY + 0.6 : tieY - 0.6, s], 0.08);
       }
     }
-    this._box(parts, 'accent', FS, 0.6, 0.45, 0.6, 0, yt + 0.4, 0);                   // obstruction light
+    this._box(parts, 'accent', FS, 0.6 * Math.max(k, 0.6), 0.45 * Math.max(k, 0.6), 0.6 * Math.max(k, 0.6), 0, yt + 0.3, 0);   // obstruction light
   },
 
   // 3S lattice pylon, after a photo of one: four splayed legs of galvanised tube tapering to a neck,
